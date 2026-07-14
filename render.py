@@ -1,4 +1,7 @@
 import json
+from pathlib import Path
+
+THEME_CSS = (Path(__file__).parent / "static" / "theme.css").read_text()
 
 
 def render_dashboard(json_path: str, output_path: str) -> str:
@@ -10,11 +13,11 @@ def render_dashboard(json_path: str, output_path: str) -> str:
     arcades_json = json.dumps(data["arcades"])
 
     status_colors = {
-        "Healthy": "#2e7d32",
-        "Watch": "#f9a825",
-        "Refresh": "#ef6c00",
-        "Replace": "#c62828",
-        "Retire": "#4a148c",
+        "Healthy": "var(--status-healthy)",
+        "Watch": "var(--status-watch)",
+        "Refresh": "var(--status-refresh)",
+        "Replace": "var(--status-replace)",
+        "Retire": "var(--status-retire)",
     }
 
     trend_arrows = {
@@ -43,67 +46,71 @@ def render_dashboard(json_path: str, output_path: str) -> str:
 <link href="https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator_midnight.min.css" rel="stylesheet">
 <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 <style>
+  {THEME_CSS}
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: #1a1a2e;
-    color: #e0e0e0;
-    padding: 20px;
+    font-family: var(--font-family);
+    background: var(--bg-page);
+    color: var(--text-primary);
+    padding: var(--space-xl);
+    max-width: 1440px;
+    margin: 0 auto;
   }}
   h1 {{
-    font-size: 1.5rem;
-    margin-bottom: 4px;
-    color: #fff;
+    font-family: var(--font-family-heading);
+    font-size: var(--font-size-2xl);
+    margin-bottom: var(--space-xs);
+    color: var(--text-on-color);
   }}
   .subtitle {{
-    color: #888;
-    font-size: 0.85rem;
-    margin-bottom: 16px;
+    color: var(--text-muted);
+    font-size: var(--font-size-sm);
+    margin-bottom: var(--space-lg);
   }}
   .summary-bar {{
     display: flex;
     gap: 10px;
     flex-wrap: wrap;
     align-items: center;
-    margin-bottom: 16px;
-    padding: 12px 16px;
-    background: #16213e;
-    border-radius: 8px;
+    margin-bottom: var(--space-lg);
+    padding: var(--space-md) var(--space-lg);
+    background: var(--bg-surface);
+    border-radius: var(--radius-md);
   }}
   .summary-stat {{
-    font-size: 0.9rem;
-    color: #aaa;
+    font-size: var(--font-size-md);
+    color: var(--text-secondary);
   }}
   .summary-stat strong {{
-    color: #fff;
-    font-size: 1.1rem;
+    color: var(--text-on-color);
+    font-size: var(--font-size-xl);
   }}
   .badge {{
     display: inline-block;
-    padding: 4px 12px;
-    border-radius: 12px;
-    color: #fff;
-    font-size: 0.8rem;
-    font-weight: 600;
+    padding: var(--space-xs) var(--space-md);
+    border-radius: var(--radius-pill);
+    color: var(--text-on-color);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
   }}
   .filters {{
     display: flex;
-    gap: 12px;
+    gap: var(--space-md);
     flex-wrap: wrap;
-    margin-bottom: 16px;
+    margin-bottom: var(--space-lg);
     align-items: center;
   }}
   .filters label {{
-    font-size: 0.8rem;
-    color: #aaa;
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
   }}
   .filters select, .filters input {{
-    background: #16213e;
-    color: #e0e0e0;
-    border: 1px solid #333;
-    border-radius: 4px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
     padding: 6px 10px;
-    font-size: 0.85rem;
+    font-size: var(--font-size-sm);
   }}
   .filter-group {{
     display: flex;
@@ -112,7 +119,7 @@ def render_dashboard(json_path: str, output_path: str) -> str:
   }}
   .status-filters {{
     display: flex;
-    gap: 8px;
+    gap: var(--space-sm);
     align-items: center;
   }}
   .status-filters label {{
@@ -121,28 +128,33 @@ def render_dashboard(json_path: str, output_path: str) -> str:
     gap: 3px;
     cursor: pointer;
   }}
-  #arcade-table {{ margin-top: 8px; }}
+  #arcade-table {{ margin-top: var(--space-sm); }}
 
   .detail-row {{
-    padding: 16px;
-    background: #0f1729;
+    padding: var(--space-lg);
+    background: var(--bg-surface-raised);
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
-    gap: 16px;
+    gap: var(--space-lg);
+  }}
+  @media (max-width: 768px) {{
+    .detail-row {{
+      grid-template-columns: 1fr;
+    }}
   }}
   .detail-section h4 {{
-    font-size: 0.8rem;
-    color: #888;
+    font-size: var(--font-size-sm);
+    color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    margin-bottom: 8px;
+    margin-bottom: var(--space-sm);
   }}
   .detail-section p {{
-    font-size: 0.85rem;
-    margin-bottom: 4px;
+    font-size: var(--font-size-sm);
+    margin-bottom: var(--space-xs);
   }}
   .detail-section a {{
-    color: #64b5f6;
+    color: var(--link-color);
     text-decoration: none;
   }}
   .detail-section a:hover {{ text-decoration: underline; }}
@@ -150,41 +162,41 @@ def render_dashboard(json_path: str, output_path: str) -> str:
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-bottom: 4px;
+    margin-bottom: var(--space-xs);
   }}
   .score-bar-label {{
     width: 90px;
-    font-size: 0.8rem;
-    color: #aaa;
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
   }}
   .score-bar-track {{
     flex: 1;
-    height: 8px;
-    background: #333;
-    border-radius: 4px;
+    height: var(--space-sm);
+    background: var(--border-default);
+    border-radius: var(--radius-sm);
     overflow: hidden;
   }}
   .score-bar-fill {{
     height: 100%;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     transition: width 0.3s;
   }}
   .score-bar-value {{
     width: 30px;
     text-align: right;
-    font-size: 0.8rem;
+    font-size: var(--font-size-sm);
   }}
   .metadata-dots {{
     display: inline-flex;
     gap: 2px;
   }}
   .metadata-dots .dot {{
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
+    width: var(--space-sm);
+    height: var(--space-sm);
+    border-radius: var(--radius-circle);
   }}
-  .dot-filled {{ background: #4caf50; }}
-  .dot-empty {{ background: #444; }}
+  .dot-filled {{ background: var(--status-healthy); }}
+  .dot-empty {{ background: var(--border-default); }}
 </style>
 </head>
 <body>
@@ -241,11 +253,12 @@ tdps.forEach(t => {{ const o = document.createElement("option"); o.value = t; o.
 owners.forEach(t => {{ const o = document.createElement("option"); o.value = t; o.textContent = t; ownerSelect.appendChild(o); }});
 
 function scoreColor(val) {{
-  if (val >= 80) return "#2e7d32";
-  if (val >= 60) return "#f9a825";
-  if (val >= 40) return "#ef6c00";
-  if (val >= 20) return "#c62828";
-  return "#4a148c";
+  const s = getComputedStyle(document.documentElement);
+  if (val >= 80) return s.getPropertyValue('--status-healthy').trim();
+  if (val >= 60) return s.getPropertyValue('--status-watch').trim();
+  if (val >= 40) return s.getPropertyValue('--status-refresh').trim();
+  if (val >= 20) return s.getPropertyValue('--status-replace').trim();
+  return s.getPropertyValue('--status-retire').trim();
 }}
 
 function metadataDots(meta) {{
@@ -269,14 +282,14 @@ function makeDetailHtml(arcade) {{
     dep.rhac_url ? '<p><a href="' + dep.rhac_url + '" target="_blank">RHAC Page</a></p>' : '',
     dep.public_site ? '<p><a href="' + dep.public_site + '" target="_blank">Public Site</a></p>' : '',
     dep.cta_link ? '<p><a href="' + dep.cta_link + '" target="_blank">CTA Link</a></p>' : '',
-  ].filter(Boolean).join("") || '<p style="color:#666">No deployment URLs</p>';
+  ].filter(Boolean).join("") || '<p style="color:var(--text-disabled)">No deployment URLs</p>';
 
   const sales = arcade.sales;
   const salesHtml = sales.has_data
     ? '<p>Pipeline: $' + (sales.total_opp_value||0).toLocaleString() + '</p>' +
       '<p>Won: $' + (sales.total_won_value||0).toLocaleString() + '</p>' +
       '<p>$/player: ' + (sales.opp_value_per_player||0).toLocaleString() + '</p>'
-    : '<p style="color:#666">No sales data</p>';
+    : '<p style="color:var(--text-disabled)">No sales data</p>';
 
   const desc = arcade.metadata.quarter_created
     ? '<p>Created: ' + arcade.metadata.quarter_created + '</p>'
@@ -287,7 +300,7 @@ function makeDetailHtml(arcade) {{
       bar("Engagement", s.engagement) + bar("Freshness", s.freshness) +
       bar("Metadata", s.metadata) + bar("Sales", s.sales) + '</div>' +
     '<div class="detail-section"><h4>Deployment</h4>' + links +
-      '<h4 style="margin-top:12px">Sales Attribution</h4>' + salesHtml + '</div>' +
+      '<h4 style="margin-top:var(--space-md)">Sales Attribution</h4>' + salesHtml + '</div>' +
     '<div class="detail-section"><h4>Details</h4>' + desc +
       '<p>Type: ' + (arcade.metadata.content_type || 'N/A') + '</p>' +
       '<p>Channels: ' + (arcade.metadata.destination_channels || 'N/A') + '</p>' +
@@ -305,25 +318,25 @@ const table = new Tabulator("#arcade-table", {{
   columns: [
     {{
       title: "Arcade", field: "name", minWidth: 250, widthGrow: 3,
-      formatter: function(cell) {{ return '<span style="font-weight:500">' + cell.getValue() + '</span>'; }}
+      formatter: function(cell) {{ return '<span style="font-weight:var(--font-weight-medium)">' + cell.getValue() + '</span>'; }}
     }},
     {{
       title: "Score", field: "health_score", width: 70, hozAlign: "center",
       formatter: function(cell) {{
         const v = cell.getValue();
-        return '<span style="color:' + scoreColor(v) + ';font-weight:700">' + v + '</span>';
+        return '<span style="color:' + scoreColor(v) + ';font-weight:var(--font-weight-bold)">' + v + '</span>';
       }}
     }},
     {{
       title: "Status", field: "status", width: 90, hozAlign: "center",
       formatter: function(cell) {{
         const v = cell.getValue();
-        return '<span class="badge" style="background:' + (STATUS_COLORS[v]||"#555") + ';font-size:0.75rem;padding:2px 8px">' + v + '</span>';
+        return '<span class="badge" style="background:' + (STATUS_COLORS[v]||"var(--border-default)") + ';font-size:var(--font-size-xs);padding:2px var(--space-sm)">' + v + '</span>';
       }}
     }},
     {{
       title: "Owner", field: "metadata.owner", width: 160,
-      formatter: function(cell) {{ return cell.getValue() || '<span style="color:#666">Unknown</span>'; }}
+      formatter: function(cell) {{ return cell.getValue() || '<span style="color:var(--text-disabled)">Unknown</span>'; }}
     }},
     {{ title: "Team", field: "metadata.team", width: 120, visible: false }},
     {{ title: "TDP", field: "metadata.tdp", width: 130 }},

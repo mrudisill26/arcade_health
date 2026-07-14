@@ -172,3 +172,30 @@ def test_theme_css_exists_and_contains_tokens():
     ]
     for token in required_tokens:
         assert token in content, f"Missing token: {token}"
+
+
+def test_render_html_uses_css_tokens(sample_health_json, tmp_path):
+    import re
+    output = str(tmp_path / "dashboard.html")
+    render_dashboard(sample_health_json, output)
+    with open(output) as f:
+        html = f.read()
+
+    assert "var(--bg-page)" in html
+    assert "var(--text-primary)" in html
+    assert "var(--status-healthy)" in html
+    assert "var(--font-family)" in html
+    assert "var(--space-lg)" in html
+    assert "var(--radius-md)" in html
+
+    style_match = re.search(r"<style>(.*?)</style>", html, re.DOTALL)
+    assert style_match, "No <style> block found"
+    style_block = style_match.group(1)
+
+    lines_after_root = style_block.split("}" , 1)[-1] if ":root" in style_block else style_block
+    hex_pattern = re.compile(r"#[0-9a-fA-F]{3,8}\b")
+    violations = []
+    for i, line in enumerate(lines_after_root.splitlines()):
+        if hex_pattern.search(line):
+            violations.append(line.strip())
+    assert not violations, f"Hardcoded hex colors found outside :root block:\n" + "\n".join(violations[:10])
