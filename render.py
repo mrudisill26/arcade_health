@@ -1,7 +1,16 @@
 import json
 from pathlib import Path
 
+from scoring import REQUEST_MASTER_STATUS_ORDER
+
 THEME_CSS = (Path(__file__).parent / "static" / "theme.css").read_text()
+
+
+def _ordered_rm_statuses(row_counts: dict, matched_counts: dict) -> list[str]:
+    extras = set(row_counts) | set(matched_counts) - set(REQUEST_MASTER_STATUS_ORDER)
+    ordered = [s for s in REQUEST_MASTER_STATUS_ORDER if s in row_counts or s in matched_counts]
+    ordered += sorted(extras)
+    return ordered
 
 
 def render_dashboard(json_path: str, output_path: str) -> str:
@@ -33,8 +42,23 @@ def render_dashboard(json_path: str, output_path: str) -> str:
         count = summary["by_status"].get(status, 0)
         color = status_colors[status]
         status_badges_html += (
-            f'<span class="badge" style="background:{color}">'
+            f'<span class="badge lifecycle-badge" style="background:{color}">'
             f"{status}: {count}</span>\n"
+        )
+
+    rm_row_counts = summary.get("request_master_row_counts_by_status", {})
+    rm_matched_counts = summary.get("matched_arcades_by_rm_status", {})
+    rm_status_list = _ordered_rm_statuses(rm_row_counts, rm_matched_counts)
+    dropdown_statuses = list(REQUEST_MASTER_STATUS_ORDER)
+    for status in rm_status_list:
+        if status not in dropdown_statuses and status != "Unknown":
+            dropdown_statuses.append(status)
+
+    rm_status_options_html = '<option value="">All arcades</option>\n'
+    for status in dropdown_statuses:
+        selected = " selected" if status == "IE Published" else ""
+        rm_status_options_html += (
+            f'<option value="{status}"{selected}>{status}</option>\n'
         )
 
     html = f"""<!DOCTYPE html>
@@ -43,7 +67,7 @@ def render_dashboard(json_path: str, output_path: str) -> str:
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Arcade Health Dashboard</title>
-<link href="https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator_midnight.min.css" rel="stylesheet">
+<link href="https://unpkg.com/tabulator-tables@6.3.1/dist/css/tabulator.min.css" rel="stylesheet">
 <script src="https://unpkg.com/tabulator-tables@6.3.1/dist/js/tabulator.min.js"></script>
 <style>
   {THEME_CSS}
@@ -52,7 +76,7 @@ def render_dashboard(json_path: str, output_path: str) -> str:
     font-family: var(--font-family);
     background: var(--bg-page);
     color: var(--text-primary);
-    padding: var(--space-xl);
+    padding: var(--space-2xl) var(--space-xl);
     max-width: 1440px;
     margin: 0 auto;
   }}
@@ -60,31 +84,46 @@ def render_dashboard(json_path: str, output_path: str) -> str:
     font-family: var(--font-family-heading);
     font-size: var(--font-size-2xl);
     margin-bottom: var(--space-xs);
-    color: var(--text-on-color);
+    color: var(--text-primary);
+    font-weight: var(--font-weight-bold);
   }}
   .subtitle {{
     color: var(--text-muted);
     font-size: var(--font-size-sm);
+    margin-bottom: var(--space-xl);
+  }}
+
+  /* Stat Cards */
+  .stat-cards {{
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: var(--space-lg);
     margin-bottom: var(--space-lg);
   }}
-  .summary-bar {{
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    align-items: center;
-    margin-bottom: var(--space-lg);
-    padding: var(--space-md) var(--space-lg);
+  .stat-card {{
     background: var(--bg-surface);
     border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    padding: var(--space-xl);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
   }}
-  .summary-stat {{
-    font-size: var(--font-size-md);
+  .stat-label {{
+    font-size: var(--font-size-sm);
     color: var(--text-secondary);
+    font-weight: var(--font-weight-medium);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }}
-  .summary-stat strong {{
-    color: var(--text-on-color);
-    font-size: var(--font-size-xl);
+  .stat-value {{
+    font-family: var(--font-family-heading);
+    font-size: var(--font-size-2xl);
+    font-weight: var(--font-weight-bold);
+    color: var(--text-primary);
   }}
+
+  /* Status Badges */
   .badge {{
     display: inline-block;
     padding: var(--space-xs) var(--space-md);
@@ -93,65 +132,129 @@ def render_dashboard(json_path: str, output_path: str) -> str:
     font-size: var(--font-size-sm);
     font-weight: var(--font-weight-semibold);
   }}
+  .status-row {{
+    display: flex;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+    margin-bottom: var(--space-xl);
+  }}
+
+  /* Filters */
+  .filter-card {{
+    background: var(--bg-surface);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    padding: var(--space-lg) var(--space-xl);
+    margin-bottom: var(--space-lg);
+  }}
   .filters {{
     display: flex;
-    gap: var(--space-md);
+    gap: var(--space-lg);
     flex-wrap: wrap;
-    margin-bottom: var(--space-lg);
-    align-items: center;
+    align-items: flex-end;
   }}
   .filters label {{
     font-size: var(--font-size-sm);
     color: var(--text-secondary);
+    font-weight: var(--font-weight-medium);
   }}
   .filters select, .filters input {{
     background: var(--bg-input);
     color: var(--text-primary);
     border: 1px solid var(--border-default);
     border-radius: var(--radius-sm);
-    padding: 6px 10px;
+    padding: var(--space-sm) var(--space-md);
     font-size: var(--font-size-sm);
+  }}
+  .filters select:focus, .filters input:focus {{
+    outline: none;
+    border-color: var(--link-color);
+    box-shadow: 0 0 0 1px var(--link-color);
   }}
   .filter-group {{
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--space-xs);
   }}
   .status-filters {{
     display: flex;
-    gap: var(--space-sm);
+    gap: var(--space-md);
     align-items: center;
   }}
   .status-filters label {{
     display: flex;
     align-items: center;
-    gap: 3px;
+    gap: var(--space-xs);
     cursor: pointer;
+    font-weight: var(--font-weight-normal);
   }}
-  #arcade-table {{ margin-top: var(--space-sm); }}
 
-  .detail-row {{
+  /* Table Card */
+  .table-card {{
+    background: var(--bg-surface);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
     padding: var(--space-lg);
+    overflow: hidden;
+  }}
+  #arcade-table {{ margin: 0; }}
+
+  /* Tabulator overrides for light theme */
+  .tabulator {{
+    border: none;
+    background: var(--bg-surface);
+    font-family: var(--font-family);
+    font-size: var(--font-size-md);
+  }}
+  .tabulator .tabulator-header {{
     background: var(--bg-surface-raised);
+    border-bottom: 1px solid var(--border-default);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+  }}
+  .tabulator .tabulator-header .tabulator-col {{
+    background: transparent;
+    border-right: none;
+  }}
+  .tabulator .tabulator-tableHolder .tabulator-table .tabulator-row {{
+    border-bottom: 1px solid var(--border-default);
+    background: var(--bg-surface);
+    min-height: 44px;
+  }}
+  .tabulator .tabulator-tableHolder .tabulator-table .tabulator-row:hover {{
+    background: var(--bg-surface-raised);
+  }}
+  .tabulator .tabulator-tableHolder .tabulator-table .tabulator-row .tabulator-cell {{
+    border-right: none;
+    padding: var(--space-md) var(--space-lg);
+  }}
+
+  /* Detail Expansion */
+  .detail-row {{
+    padding: var(--space-xl);
+    background: var(--bg-surface-raised);
+    border-top: 1px solid var(--border-default);
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
-    gap: var(--space-lg);
+    gap: var(--space-xl);
   }}
   @media (max-width: 768px) {{
-    .detail-row {{
-      grid-template-columns: 1fr;
-    }}
+    .stat-cards {{ grid-template-columns: 1fr; }}
+    .detail-row {{ grid-template-columns: 1fr; }}
   }}
   .detail-section h4 {{
-    font-size: var(--font-size-sm);
+    font-size: var(--font-size-xs);
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin-bottom: var(--space-sm);
+    font-weight: var(--font-weight-semibold);
   }}
   .detail-section p {{
     font-size: var(--font-size-sm);
     margin-bottom: var(--space-xs);
+    color: var(--text-secondary);
   }}
   .detail-section a {{
     color: var(--link-color);
@@ -161,8 +264,8 @@ def render_dashboard(json_path: str, output_path: str) -> str:
   .score-bar {{
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-bottom: var(--space-xs);
+    gap: var(--space-sm);
+    margin-bottom: var(--space-sm);
   }}
   .score-bar-label {{
     width: 90px;
@@ -185,10 +288,11 @@ def render_dashboard(json_path: str, output_path: str) -> str:
     width: 30px;
     text-align: right;
     font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
   }}
   .metadata-dots {{
     display: inline-flex;
-    gap: 2px;
+    gap: var(--space-xs);
   }}
   .metadata-dots .dot {{
     width: var(--space-sm);
@@ -204,40 +308,67 @@ def render_dashboard(json_path: str, output_path: str) -> str:
 <h1>Arcade Health Dashboard</h1>
 <p class="subtitle">Data as of: {generated_date}</p>
 
-<div class="summary-bar">
-  <div class="summary-stat"><strong>{summary['total_arcades']}</strong> arcades</div>
-  <div class="summary-stat"><strong>{summary['unowned_count']}</strong> unowned</div>
-  <div class="summary-stat">avg score: <strong>{summary['avg_health_score']}</strong></div>
-  <div style="flex:1"></div>
+<div class="stat-cards">
+  <div class="stat-card">
+    <span class="stat-label">Total Arcades</span>
+    <span class="stat-value">{summary['total_arcades']}</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">IE Published</span>
+    <span class="stat-value">{summary.get('ie_published_count', 0)}</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">IE Retired</span>
+    <span class="stat-value">{summary.get('ie_retired_count', 0)}</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">Avg Score (IE Published)</span>
+    <span class="stat-value">{summary.get('avg_health_score_ie_published') or '—'}</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-label">Unowned</span>
+    <span class="stat-value">{summary['unowned_count']}</span>
+  </div>
+</div>
+
+<div class="status-row">
   {status_badges_html}
 </div>
 
-<div class="filters">
-  <div class="filter-group">
-    <label>Status</label>
-    <div class="status-filters">
-      <label><input type="checkbox" class="status-cb" value="Healthy" checked> Healthy</label>
-      <label><input type="checkbox" class="status-cb" value="Watch" checked> Watch</label>
-      <label><input type="checkbox" class="status-cb" value="Refresh" checked> Refresh</label>
-      <label><input type="checkbox" class="status-cb" value="Replace" checked> Replace</label>
-      <label><input type="checkbox" class="status-cb" value="Retire" checked> Retire</label>
+<div class="filter-card">
+  <div class="filters">
+    <div class="filter-group">
+      <label>Request Master status</label>
+      <select id="filter-rm-status">{rm_status_options_html}</select>
     </div>
-  </div>
-  <div class="filter-group">
-    <label>TDP</label>
-    <select id="filter-tdp"><option value="">All</option></select>
-  </div>
-  <div class="filter-group">
-    <label>Owner</label>
-    <select id="filter-owner"><option value="">All</option></select>
-  </div>
-  <div class="filter-group">
-    <label>Search</label>
-    <input type="text" id="filter-search" placeholder="Arcade name...">
+    <div class="filter-group">
+      <label>Lifecycle status</label>
+      <div class="status-filters">
+        <label><input type="checkbox" class="status-cb" value="Healthy" checked> Healthy</label>
+        <label><input type="checkbox" class="status-cb" value="Watch" checked> Watch</label>
+        <label><input type="checkbox" class="status-cb" value="Refresh" checked> Refresh</label>
+        <label><input type="checkbox" class="status-cb" value="Replace" checked> Replace</label>
+        <label><input type="checkbox" class="status-cb" value="Retire" checked> Retire</label>
+      </div>
+    </div>
+    <div class="filter-group">
+      <label>TDP</label>
+      <select id="filter-tdp"><option value="">All</option></select>
+    </div>
+    <div class="filter-group">
+      <label>Owner</label>
+      <select id="filter-owner"><option value="">All</option></select>
+    </div>
+    <div class="filter-group">
+      <label>Search</label>
+      <input type="text" id="filter-search" placeholder="Arcade name...">
+    </div>
   </div>
 </div>
 
-<div id="arcade-table"></div>
+<div class="table-card">
+  <div id="arcade-table"></div>
+</div>
 
 <script>
 const ARCADE_DATA = {arcades_json};
@@ -249,8 +380,25 @@ const tdps = [...new Set(ARCADE_DATA.map(a => a.metadata.tdp).filter(Boolean))].
 const owners = [...new Set(ARCADE_DATA.map(a => a.metadata.owner).filter(Boolean))].sort();
 const tdpSelect = document.getElementById("filter-tdp");
 const ownerSelect = document.getElementById("filter-owner");
+const rmStatusSelect = document.getElementById("filter-rm-status");
 tdps.forEach(t => {{ const o = document.createElement("option"); o.value = t; o.textContent = t; tdpSelect.appendChild(o); }});
 owners.forEach(t => {{ const o = document.createElement("option"); o.value = t; o.textContent = t; ownerSelect.appendChild(o); }});
+
+function arcadeHasRmStatus(data, rmStatus) {{
+  const all = data.metadata.all_rm_statuses || [];
+  const primary = data.metadata.rm_status || "";
+  return primary === rmStatus || all.includes(rmStatus);
+}}
+
+function rmStatusText(meta) {{
+  const statuses = (meta.all_rm_statuses && meta.all_rm_statuses.length)
+    ? meta.all_rm_statuses
+    : (meta.rm_status ? [meta.rm_status] : []);
+  if (!statuses.length) {{
+    return '<span style="color:var(--text-disabled)">—</span>';
+  }}
+  return statuses.join(", ");
+}}
 
 function scoreColor(val) {{
   const s = getComputedStyle(document.documentElement);
@@ -294,6 +442,12 @@ function makeDetailHtml(arcade) {{
   const desc = arcade.metadata.quarter_created
     ? '<p>Created: ' + arcade.metadata.quarter_created + '</p>'
     : '';
+  const statuses = (arcade.metadata.all_rm_statuses && arcade.metadata.all_rm_statuses.length)
+    ? arcade.metadata.all_rm_statuses
+    : (arcade.metadata.rm_status ? [arcade.metadata.rm_status] : []);
+  const rmStatusLine = statuses.length
+    ? '<p>Request Master status: ' + statuses.join(", ") + '</p>'
+    : '<p>Request Master status: <span style="color:var(--text-disabled)">No match</span></p>';
 
   return '<div class="detail-row">' +
     '<div class="detail-section"><h4>Score Breakdown</h4>' +
@@ -301,7 +455,7 @@ function makeDetailHtml(arcade) {{
       bar("Metadata", s.metadata) + bar("Sales", s.sales) + '</div>' +
     '<div class="detail-section"><h4>Deployment</h4>' + links +
       '<h4 style="margin-top:var(--space-md)">Sales Attribution</h4>' + salesHtml + '</div>' +
-    '<div class="detail-section"><h4>Details</h4>' + desc +
+    '<div class="detail-section"><h4>Details</h4>' + desc + rmStatusLine +
       '<p>Type: ' + (arcade.metadata.content_type || 'N/A') + '</p>' +
       '<p>Channels: ' + (arcade.metadata.destination_channels || 'N/A') + '</p>' +
     '</div></div>';
@@ -328,11 +482,15 @@ const table = new Tabulator("#arcade-table", {{
       }}
     }},
     {{
-      title: "Status", field: "status", width: 90, hozAlign: "center",
+      title: "Lifecycle", field: "status", width: 90, hozAlign: "center",
       formatter: function(cell) {{
         const v = cell.getValue();
-        return '<span class="badge" style="background:' + (STATUS_COLORS[v]||"var(--border-default)") + ';font-size:var(--font-size-xs);padding:2px var(--space-sm)">' + v + '</span>';
+        return '<span class="badge lifecycle-badge" style="background:' + (STATUS_COLORS[v]||"var(--border-default)") + ';font-size:var(--font-size-xs);padding:2px var(--space-sm)">' + v + '</span>';
       }}
+    }},
+    {{
+      title: "RM Status", field: "metadata.rm_status", width: 160,
+      formatter: function(cell) {{ return rmStatusText(cell.getRow().getData().metadata); }}
     }},
     {{
       title: "Owner", field: "metadata.owner", width: 160,
@@ -376,11 +534,13 @@ table.on("rowClick", function(e, row) {{
 // Filtering
 function applyFilters() {{
   const checkedStatuses = [...document.querySelectorAll(".status-cb:checked")].map(cb => cb.value);
+  const rmStatus = rmStatusSelect.value;
   const tdp = tdpSelect.value;
   const owner = ownerSelect.value;
   const search = document.getElementById("filter-search").value.toLowerCase();
 
   table.setFilter(function(data) {{
+    if (rmStatus && !arcadeHasRmStatus(data, rmStatus)) return false;
     if (!checkedStatuses.includes(data.status)) return false;
     if (tdp && data.metadata.tdp !== tdp) return false;
     if (owner && data.metadata.owner !== owner) return false;
@@ -389,10 +549,12 @@ function applyFilters() {{
   }});
 }}
 
+document.getElementById("filter-rm-status").addEventListener("change", applyFilters);
 document.querySelectorAll(".status-cb").forEach(cb => cb.addEventListener("change", applyFilters));
 tdpSelect.addEventListener("change", applyFilters);
 ownerSelect.addEventListener("change", applyFilters);
 document.getElementById("filter-search").addEventListener("input", applyFilters);
+applyFilters();
 </script>
 </body>
 </html>"""

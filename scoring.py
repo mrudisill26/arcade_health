@@ -43,13 +43,158 @@ RM_COLS = [
     "Demo Description",
 ]
 
+IE_PUBLISHED_STATUS = "IE Published"
+IE_RETIRED_STATUS = "IE Retired"
+IE_REVIEWED_STATUS = "IE Reviewed"
+IE_RECEIVED_STATUS = "IE Received"
+CLOSED_STATUS = "Closed"
+
+# Known Request Master Status dropdown values (sheet column "Status")
+REQUEST_MASTER_STATUS_ORDER = [
+    "IE Open",
+    "IE Approved",
+    IE_RECEIVED_STATUS,
+    IE_REVIEWED_STATUS,
+    IE_PUBLISHED_STATUS,
+    IE_RETIRED_STATUS,
+    CLOSED_STATUS,
+]
+
+
+def find_request_status_column(df: pd.DataFrame) -> str | None:
+    """Return the Request Master workflow Status column, not timestamp columns."""
+    for col in df.columns:
+        if col.strip().lower() == "status":
+            return col
+    for col in df.columns:
+        lower = col.lower()
+        if "status" in lower and "timestamp" not in lower:
+            return col
+    return None
+
+
+def _find_status_column(df: pd.DataFrame) -> str | None:
+    return find_request_status_column(df)
+
+
+def _normalize_join_key(val) -> str:
+    if pd.isna(val):
+        return ""
+    return str(val).strip()
+
+
+def _normalize_rm_status(val) -> str:
+    if pd.isna(val):
+        return ""
+    return str(val).strip()
+
+
+def summarize_request_master_statuses(request_master: pd.DataFrame) -> dict[str, int]:
+    """Count rows per Status dropdown value in the Request Master sheet."""
+    status_col = find_request_status_column(request_master)
+    if not status_col:
+        return {}
+
+    counts = (
+        request_master[status_col]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .replace("", "Unknown")
+        .value_counts()
+        .to_dict()
+    )
+    return {k: int(v) for k, v in counts.items()}
+
+
+def _build_rm_status_lookups(
+    request_master: pd.DataFrame,
+) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Map Join Key and normalized demo title to all Status values on matching RM rows."""
+    status_col = find_request_status_column(request_master)
+    by_join_key: dict[str, set[str]] = {}
+    by_norm_title: dict[str, set[str]] = {}
+
+    if not status_col:
+        return {}, {}
+
+    for _, row in request_master.iterrows():
+        status = _normalize_rm_status(row.get(status_col))
+        if not status:
+            continue
+
+        join_key = _normalize_join_key(row.get("Join Key"))
+        if join_key:
+            by_join_key.setdefault(join_key, set()).add(status)
+
+        title = _normalize_name(row.get("Final Demo Title", ""))
+        if title:
+            by_norm_title.setdefault(title, set()).add(status)
+
+    return (
+        {k: sorted(v) for k, v in by_join_key.items()},
+        {k: sorted(v) for k, v in by_norm_title.items()},
+    )
+
+
+def _statuses_for_arcade(
+    arcade_key: str,
+    by_join_key: dict[str, list[str]],
+    by_norm_title: dict[str, list[str]],
+) -> list[str]:
+    statuses = set(by_join_key.get(arcade_key, []))
+    norm = _normalize_name(arcade_key)
+    if norm:
+        statuses.update(by_norm_title.get(norm, []))
+    return sorted(statuses)
+
+
+def _dedupe_rm_prefer_ie_published(rm: pd.DataFrame, subset: str) -> pd.DataFrame:
+    """When multiple RM rows share a join key, keep IE Published for metadata."""
+    if subset not in rm.columns or len(rm) == 0:
+        return rm
+
+    deduped = rm.copy()
+    if "rm_status" not in deduped.columns:
+        deduped["rm_status"] = ""
+
+    has_key = deduped[subset].notna() & (
+        deduped[subset].astype(str).str.strip() != ""
+    )
+    with_key = deduped[has_key].copy()
+    without_key = deduped[~has_key].copy()
+
+    if len(with_key) > 0:
+        with_key["_rm_priority"] = (
+            with_key["rm_status"] == IE_PUBLISHED_STATUS
+        ).astype(int)
+        with_key = with_key.sort_values("_rm_priority", ascending=False)
+        with_key = with_key.drop_duplicates(subset=subset, keep="first")
+        with_key = with_key.drop(columns=["_rm_priority"])
+
+    return pd.concat([with_key, without_key], ignore_index=True)
+
+
+def _prepare_request_master(request_master: pd.DataFrame) -> pd.DataFrame:
+    rm = request_master.copy()
+    status_col = find_request_status_column(rm)
+    if status_col:
+        rm = rm.rename(columns={status_col: "rm_status"})
+    else:
+        rm["rm_status"] = ""
+
+    cols = [c for c in RM_COLS if c in rm.columns]
+    if "rm_status" not in cols:
+        cols.append("rm_status")
+    rm = rm[cols].copy()
+    return _dedupe_rm_prefer_ie_published(rm, "Join Key")
+
 
 def merge_datasets(
     engagement: pd.DataFrame, request_master: pd.DataFrame
 ) -> pd.DataFrame:
-    rm = request_master[
-        [c for c in RM_COLS if c in request_master.columns]
-    ].copy()
+    rm = _prepare_request_master(request_master)
+    status_by_join_key, status_by_norm_title = _build_rm_status_lookups(request_master)
 
     arcade_agg = engagement.groupby("arcade_display_key").agg(
         total_players=("arcade_players_sum", "sum"),
@@ -148,10 +293,10 @@ def merge_datasets(
     merged = arcade_agg.merge(rm, left_on="arcade_display_key", right_on="Join Key", how="left")
     pass1_matched = set(merged.loc[merged["Final Demo Title"].notna(), "Join Key"])
 
-    # Pass 2: normalized fallback
+    # Pass 2: normalized fallback (prefer IE Published on title collisions)
     rm_remaining = rm[~rm["Join Key"].isin(pass1_matched)].copy()
     rm_remaining["_norm"] = rm_remaining["Final Demo Title"].apply(_normalize_name)
-    norm_lookup = rm_remaining.drop_duplicates("_norm").set_index("_norm")
+    norm_lookup = _dedupe_rm_prefer_ie_published(rm_remaining, "_norm").set_index("_norm")
 
     for idx in merged.index:
         if pd.notna(merged.loc[idx, "Final Demo Title"]):
@@ -166,6 +311,31 @@ def merge_datasets(
 
     # Flatten to standard column names
     merged["has_rm_match"] = merged["Final Demo Title"].notna()
+    merged["rm_status"] = merged.get("rm_status", pd.Series(dtype=str)).fillna("")
+    merged["all_rm_statuses"] = merged["arcade_display_key"].apply(
+        lambda key: _statuses_for_arcade(key, status_by_join_key, status_by_norm_title)
+    )
+    # If join picked a primary status but lookup found more, keep the full set
+    for idx in merged.index:
+        if merged.loc[idx, "rm_status"] and merged.loc[idx, "rm_status"] not in merged.loc[idx, "all_rm_statuses"]:
+            merged.at[idx, "all_rm_statuses"] = sorted(
+                set(merged.loc[idx, "all_rm_statuses"]) | {merged.loc[idx, "rm_status"]}
+            )
+    merged["is_ie_published"] = merged["all_rm_statuses"].apply(
+        lambda statuses: IE_PUBLISHED_STATUS in statuses
+    )
+    merged["is_ie_retired"] = merged["all_rm_statuses"].apply(
+        lambda statuses: IE_RETIRED_STATUS in statuses
+    )
+    merged["is_ie_reviewed"] = merged["all_rm_statuses"].apply(
+        lambda statuses: IE_REVIEWED_STATUS in statuses
+    )
+    merged["is_ie_received"] = merged["all_rm_statuses"].apply(
+        lambda statuses: IE_RECEIVED_STATUS in statuses
+    )
+    merged["is_closed"] = merged["all_rm_statuses"].apply(
+        lambda statuses: CLOSED_STATUS in statuses
+    )
     merged["owner"] = merged.get("Creator Name", pd.Series(dtype=str))
     merged["team"] = merged.get("Creator Team", pd.Series(dtype=str))
     merged["content_type"] = merged.get("Final Content Type", pd.Series(dtype=str))
@@ -393,7 +563,11 @@ def _safe_int(val) -> int | None:
     return int(val)
 
 
-def export_health_json(scored_df: pd.DataFrame, output_path: str) -> dict:
+def export_health_json(
+    scored_df: pd.DataFrame,
+    output_path: str,
+    request_master: pd.DataFrame | None = None,
+) -> dict:
     status_counts = scored_df["status"].value_counts().to_dict()
     for s in ["Healthy", "Watch", "Refresh", "Replace", "Retire"]:
         status_counts.setdefault(s, 0)
@@ -401,14 +575,49 @@ def export_health_json(scored_df: pd.DataFrame, output_path: str) -> dict:
     unowned = int(
         ((scored_df["owner"].isna()) | (scored_df["owner"] == "")).sum()
     )
+    ie_published_df = (
+        scored_df[scored_df["is_ie_published"]]
+        if "is_ie_published" in scored_df.columns
+        else scored_df.iloc[0:0]
+    )
+    ie_published_count = len(ie_published_df)
+    ie_retired_count = int(scored_df.get("is_ie_retired", pd.Series(dtype=bool)).sum())
+    rm_status_counts = (
+        scored_df["rm_status"].replace("", "No RM match").value_counts().to_dict()
+        if "rm_status" in scored_df.columns
+        else {}
+    )
+    request_master_row_counts = (
+        summarize_request_master_statuses(request_master)
+        if request_master is not None
+        else {}
+    )
+    matched_arcades_by_rm_status: dict[str, int] = {}
+    if "all_rm_statuses" in scored_df.columns:
+        for statuses in scored_df["all_rm_statuses"]:
+            for status in statuses or []:
+                if status:
+                    matched_arcades_by_rm_status[status] = (
+                        matched_arcades_by_rm_status.get(status, 0) + 1
+                    )
 
     result = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "summary": {
             "total_arcades": len(scored_df),
             "by_status": {k: int(v) for k, v in status_counts.items()},
+            "by_rm_status": {k: int(v) for k, v in rm_status_counts.items()},
+            "request_master_row_counts_by_status": request_master_row_counts,
+            "matched_arcades_by_rm_status": matched_arcades_by_rm_status,
             "unowned_count": unowned,
+            "ie_published_count": ie_published_count,
+            "ie_retired_count": ie_retired_count,
             "avg_health_score": round(float(scored_df["health_score"].mean()), 1),
+            "avg_health_score_ie_published": (
+                round(float(ie_published_df["health_score"].mean()), 1)
+                if ie_published_count > 0
+                else None
+            ),
         },
         "arcades": [],
     }
@@ -434,6 +643,13 @@ def export_health_json(scored_df: pd.DataFrame, output_path: str) -> dict:
             },
             "metadata": {
                 "has_rm_match": bool(row.get("has_rm_match", False)),
+                "rm_status": _safe_str(row.get("rm_status")),
+                "all_rm_statuses": list(row.get("all_rm_statuses") or []),
+                "is_ie_published": bool(row.get("is_ie_published", False)),
+                "is_ie_retired": bool(row.get("is_ie_retired", False)),
+                "is_ie_reviewed": bool(row.get("is_ie_reviewed", False)),
+                "is_ie_received": bool(row.get("is_ie_received", False)),
+                "is_closed": bool(row.get("is_closed", False)),
                 "owner": _safe_str(row.get("owner")),
                 "team": _safe_str(row.get("team")),
                 "product": _safe_str(row.get("product")),

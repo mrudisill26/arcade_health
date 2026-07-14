@@ -1,4 +1,7 @@
 import argparse
+import http.server
+import socket
+import socketserver
 import sys
 from pathlib import Path
 
@@ -27,6 +30,17 @@ def main():
         action="store_true",
         help="Skip data pull from Databricks/Sheets, use existing CSVs",
     )
+    parser.add_argument(
+        "--no-serve",
+        action="store_true",
+        help="Don't start a local server after building",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port for local server (default: 8000)",
+    )
     args = parser.parse_args()
 
     # Stage 1: Data Pull
@@ -54,9 +68,12 @@ def main():
     rm = load_request_master(str(REQUEST_MASTER_CSV))
     merged = merge_datasets(engagement, rm)
     scored = compute_health_scores(merged)
-    result = export_health_json(scored, str(HEALTH_JSON))
+    result = export_health_json(scored, str(HEALTH_JSON), request_master=rm)
     print(f"  Scored {result['summary']['total_arcades']} arcades")
-    print(f"  Status breakdown: {result['summary']['by_status']}")
+    print(f"  Lifecycle status breakdown: {result['summary']['by_status']}")
+    rm_counts = result["summary"].get("request_master_row_counts_by_status", {})
+    if rm_counts:
+        print(f"  Request Master Status column: {rm_counts}")
     print(f"  Average health score: {result['summary']['avg_health_score']}")
     print(f"  Saved to {HEALTH_JSON}")
 
@@ -65,7 +82,33 @@ def main():
     output = render_dashboard(str(HEALTH_JSON), str(DASHBOARD_HTML))
     print(f"  Dashboard saved to {output}")
     print()
-    print(f"Done! Open {DASHBOARD_HTML} in a browser.")
+
+    port = args.port
+    if args.no_serve:
+        print(f"Done! View at: http://localhost:{port}/{DASHBOARD_HTML}")
+        return
+
+    handler = http.server.SimpleHTTPRequestHandler
+
+    class ReusableServer(socketserver.TCPServer):
+        allow_reuse_address = True
+
+    try:
+        server = ReusableServer(("", port), handler)
+    except OSError:
+        sock = socket.socket()
+        sock.bind(("", 0))
+        port = sock.getsockname()[1]
+        sock.close()
+        server = ReusableServer(("", port), handler)
+
+    print(f"Done! Dashboard is live at: http://localhost:{port}/{DASHBOARD_HTML}")
+    print("Press Ctrl+C to stop the server.")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nServer stopped.")
+        server.server_close()
 
 
 if __name__ == "__main__":

@@ -12,7 +12,17 @@ def sample_health_json(tmp_path):
             "total_arcades": 3,
             "by_status": {"Healthy": 1, "Watch": 1, "Refresh": 0, "Replace": 0, "Retire": 1},
             "unowned_count": 1,
+            "ie_published_count": 1,
+            "ie_retired_count": 0,
+            "request_master_row_counts_by_status": {
+                "IE Published": 2,
+                "Unknown": 1,
+            },
+            "matched_arcades_by_rm_status": {
+                "IE Published": 2,
+            },
             "avg_health_score": 52.0,
+            "avg_health_score_ie_published": 85.0,
         },
         "arcades": [
             {
@@ -30,6 +40,9 @@ def sample_health_json(tmp_path):
                 },
                 "metadata": {
                     "has_rm_match": True,
+                    "rm_status": "IE Published",
+                    "all_rm_statuses": ["IE Published"],
+                    "is_ie_published": True,
                     "owner": "Alice Smith",
                     "team": "Team A",
                     "product": "OpenShift",
@@ -67,6 +80,9 @@ def sample_health_json(tmp_path):
                 },
                 "metadata": {
                     "has_rm_match": True,
+                    "rm_status": "IE Published",
+                    "all_rm_statuses": ["IE Published"],
+                    "is_ie_published": True,
                     "owner": "Bob Jones",
                     "team": "Team B",
                     "product": "RHEL",
@@ -99,6 +115,9 @@ def sample_health_json(tmp_path):
                 },
                 "metadata": {
                     "has_rm_match": False,
+                    "rm_status": "",
+                    "all_rm_statuses": [],
+                    "is_ie_published": False,
                     "owner": "",
                     "team": "",
                     "product": "",
@@ -138,6 +157,19 @@ def test_render_html_contains_key_elements(sample_health_json, tmp_path):
     assert "Retire" in html
     assert "2026-07-14" in html
     assert "tabulator" in html.lower() or "Tabulator" in html
+    assert ">IE Published</option>" in html
+    assert "metadata.rm_status" in html
+    assert " — " not in html.split("<select id=\"filter-rm-status\">")[1].split("</select>")[0]
+
+
+def test_render_rm_status_is_plain_text(sample_health_json, tmp_path):
+    output = str(tmp_path / "dashboard.html")
+    render_dashboard(sample_health_json, output)
+    with open(output) as f:
+        html = f.read()
+    assert "rmStatusText" in html
+    assert "rm-status-badge" not in html
+    assert "rm-status-tag" not in html
 
 
 def test_render_html_is_self_contained(sample_health_json, tmp_path):

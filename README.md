@@ -42,7 +42,7 @@ Output: `arcade_health_dashboard.html` — open in any browser.
 This project requires two CSV files in `data/`:
 
 1. **`data/databricksaracade.csv`** — Engagement data from Databricks (pulled via `data_to_csv_v1.py`)
-2. **`data/request_master.csv`** — Metadata from Google Sheets Request_Master (pulled via `data_to_csv_v1.py`)
+2. **`data/request_master.csv`** — Metadata from Google Sheets Request_Master (all statuses; analysis focuses on IE Published)
 
 Data files are not included in the repository. Run `python build_dashboard.py` (without `--skip-pull`) to fetch them, or place the CSVs manually.
 

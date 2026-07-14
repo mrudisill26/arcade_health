@@ -5,6 +5,7 @@ from scoring import (
     load_engagement_data,
     load_request_master,
     merge_datasets,
+    find_request_status_column,
     score_engagement,
     score_freshness,
     score_metadata,
@@ -55,11 +56,11 @@ def sample_rm_csv(tmp_path):
         '"Final Demo Title","Join Key","Creator Name","Creator Team",'
         '"Final Content Type","Quarter","CTALink","Drupal Page URL",'
         '"RHAC page","Public Site Link","Primary Product","TDP",'
-        '"Destination Channels","Demo Description"\n'
+        '"Destination Channels","Demo Description","Request Status"\n'
         '"Arcade Alpha","Arcade Alpha | Business Intro","Alice Smith","Team A",'
         '"Business Intro","CY26Q1","https://cta.example.com","https://drupal.example.com",'
         '"https://rhac.example.com","https://public.example.com","OpenShift","Virtualization",'
-        '"Web, Social","A demo about OpenShift"\n'
+        '"Web, Social","A demo about OpenShift","IE Published"\n'
     )
     return str(csv_path)
 
@@ -87,6 +88,101 @@ def test_merge_datasets_exact_match(sample_engagement_csv, sample_rm_csv):
     assert alpha["owner"] == "Alice Smith"
     assert alpha["team"] == "Team A"
     assert alpha["has_rm_match"] == True
+    assert alpha["is_ie_published"] == True
+    assert alpha["rm_status"] == "IE Published"
+
+
+def test_find_request_status_column_ignores_timestamps(sample_rm_csv):
+    df = load_request_master(sample_rm_csv)
+    df["Status Open Timestamp"] = "2026-01-01"
+    assert find_request_status_column(df) == "Request Status"
+
+
+def test_merge_prefers_ie_published_on_duplicate_join_key(sample_engagement_csv, tmp_path):
+    csv_path = tmp_path / "request_master_dup.csv"
+    csv_path.write_text(
+        '"Final Demo Title","Join Key","Creator Name","Creator Team",'
+        '"Final Content Type","Quarter","CTALink","Drupal Page URL",'
+        '"RHAC page","Public Site Link","Primary Product","TDP",'
+        '"Destination Channels","Demo Description","Request Status"\n'
+        '"Arcade Alpha Draft","Arcade Alpha | Business Intro","Draft Owner","Draft Team",'
+        '"Business Intro","CY25Q4","","","","","OpenShift","Virtualization",'
+        '"Web","Draft version","In Progress"\n'
+        '"Arcade Alpha","Arcade Alpha | Business Intro","Alice Smith","Team A",'
+        '"Business Intro","CY26Q1","https://cta.example.com","https://drupal.example.com",'
+        '"https://rhac.example.com","https://public.example.com","OpenShift","Virtualization",'
+        '"Web, Social","Published version","IE Published"\n'
+        '"Arcade Alpha Retired","Arcade Alpha | Business Intro","Retired Owner","Retired Team",'
+        '"Business Intro","CY24Q4","","","","","OpenShift","Virtualization",'
+        '"Web","Retired version","IE Retired"\n'
+    )
+    eng = load_engagement_data(sample_engagement_csv)
+    rm = load_request_master(str(csv_path))
+    merged = merge_datasets(eng, rm)
+    alpha = merged[merged["arcade_display_key"] == "Arcade Alpha | Business Intro"].iloc[0]
+    assert alpha["owner"] == "Alice Smith"
+    assert alpha["is_ie_published"] == True
+    assert alpha["is_ie_retired"] == True
+    assert alpha["all_rm_statuses"] == ["IE Published", "IE Retired", "In Progress"]
+
+
+def test_merge_keeps_all_status_rows_without_join_key(tmp_path):
+    csv_path = tmp_path / "request_master_no_key.csv"
+    csv_path.write_text(
+        '"Final Demo Title","Join Key","Creator Name","Creator Team",'
+        '"Final Content Type","Quarter","Request Status"\n'
+        '"Draft A","","Owner A","Team A","Business Intro","CY26Q1","IE Received"\n'
+        '"Draft B","","Owner B","Team B","Business Intro","CY26Q1","Closed"\n'
+    )
+    df = load_request_master(str(csv_path))
+    from scoring import _prepare_request_master
+    prepared = _prepare_request_master(df)
+    assert len(prepared) == 2
+
+
+def test_merge_matches_non_ie_published_status(sample_engagement_csv, tmp_path):
+    csv_path = tmp_path / "request_master_draft.csv"
+    csv_path.write_text(
+        '"Final Demo Title","Join Key","Creator Name","Creator Team",'
+        '"Final Content Type","Quarter","CTALink","Drupal Page URL",'
+        '"RHAC page","Public Site Link","Primary Product","TDP",'
+        '"Destination Channels","Demo Description","Request Status"\n'
+        '"Arcade Beta","Arcade Beta","Bob Jones","Team B",'
+        '"Technical Walkthrough","CY25Q2","","https://drupal.example.com",'
+        '"","","RHEL","AI Platform",'
+        '"Web","Beta draft","In Progress"\n'
+    )
+    eng = load_engagement_data(sample_engagement_csv)
+    rm = load_request_master(str(csv_path))
+    merged = merge_datasets(eng, rm)
+    beta = merged[merged["arcade_display_key"] == "Arcade Beta"].iloc[0]
+    assert beta["has_rm_match"] == True
+    assert beta["owner"] == "Bob Jones"
+    assert beta["is_ie_published"] == False
+    assert beta["rm_status"] == "In Progress"
+
+
+def test_merge_matches_ie_retired_status(sample_engagement_csv, tmp_path):
+    csv_path = tmp_path / "request_master_retired.csv"
+    csv_path.write_text(
+        '"Final Demo Title","Join Key","Creator Name","Creator Team",'
+        '"Final Content Type","Quarter","CTALink","Drupal Page URL",'
+        '"RHAC page","Public Site Link","Primary Product","TDP",'
+        '"Destination Channels","Demo Description","Request Status"\n'
+        '"Arcade Beta","Arcade Beta","Retired Owner","Retired Team",'
+        '"Technical Walkthrough","CY23Q4","","https://drupal.example.com",'
+        '"","","RHEL","AI Platform",'
+        '"Web","Retired demo","IE Retired"\n'
+    )
+    eng = load_engagement_data(sample_engagement_csv)
+    rm = load_request_master(str(csv_path))
+    merged = merge_datasets(eng, rm)
+    beta = merged[merged["arcade_display_key"] == "Arcade Beta"].iloc[0]
+    assert beta["has_rm_match"] == True
+    assert beta["owner"] == "Retired Owner"
+    assert beta["is_ie_retired"] == True
+    assert beta["is_ie_published"] == False
+    assert beta["rm_status"] == "IE Retired"
 
 
 def test_merge_datasets_unmatched_arcade(sample_engagement_csv, sample_rm_csv):
@@ -159,16 +255,19 @@ def test_lifecycle_status_thresholds(merged_df):
             assert status == "Retire"
 
 
-def test_export_health_json_structure(merged_df, tmp_path):
+def test_export_health_json_structure(merged_df, sample_rm_csv, tmp_path):
     import json
     scored = compute_health_scores(merged_df)
+    rm = load_request_master(sample_rm_csv)
     output_path = str(tmp_path / "health.json")
-    result = export_health_json(scored, output_path)
+    result = export_health_json(scored, output_path, request_master=rm)
 
     assert "generated_at" in result
     assert "summary" in result
     assert "arcades" in result
     assert result["summary"]["total_arcades"] == 2
+    assert "request_master_row_counts_by_status" in result["summary"]
+    assert result["summary"]["request_master_row_counts_by_status"]["IE Published"] == 1
     assert set(result["summary"]["by_status"].keys()) <= {
         "Healthy", "Watch", "Refresh", "Replace", "Retire"
     }

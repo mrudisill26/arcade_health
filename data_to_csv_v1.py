@@ -4,6 +4,8 @@ import pandas as pd
 from databricks import sql
 from databricks.sdk.core import Config
 
+from scoring import find_request_status_column, summarize_request_master_statuses
+
 
 def fetch_databricks_data():
     """Pull arcade demo data from Databricks and save to CSV."""
@@ -31,7 +33,7 @@ def fetch_databricks_data():
 
 
 def fetch_google_sheets_data():
-    """Pull Request_Master from Google Sheets, filter to IE Published, save to CSV."""
+    """Pull all Request_Master rows from Google Sheets and save to CSV."""
     print("Connecting to Google Sheets...")
     gc = gspread.oauth()
     sh = gc.open_by_url(
@@ -47,17 +49,18 @@ def fetch_google_sheets_data():
     # Replace newlines within cells so each spreadsheet row = one CSV row
     df = df.replace(r'\n', ' ', regex=True)
 
-    # Filter to only "IE Published" status rows
-    status_col = [c for c in headers if "status" in c.lower()]
+    status_col = find_request_status_column(df)
     if not status_col:
         raise ValueError(f"Could not find a status column. Available columns: {headers}")
 
-    df_published = df[df[status_col[0]] == "IE Published"]
+    status_counts = summarize_request_master_statuses(df)
 
-    df_published.to_csv("data/request_master.csv", index=False, quoting=csv.QUOTE_ALL)
-    print(f"Total rows: {len(df)} | IE Published: {len(df_published)} → saved to data/request_master.csv")
+    df.to_csv("data/request_master.csv", index=False, quoting=csv.QUOTE_ALL)
+    print(f"Saved {len(df)} rows to data/request_master.csv (all Status dropdown values)")
+    print(f"  Status column: {status_col!r}")
+    print(f"  Status breakdown: {status_counts}")
 
-    return df_published
+    return df
 
 
 def run():
@@ -68,7 +71,7 @@ def run():
 
     print()
     print("=" * 60)
-    print("Step 2: Fetch Google Sheets Request_Master (IE Published)")
+    print("Step 2: Fetch Google Sheets Request_Master (all statuses)")
     print("=" * 60)
     fetch_google_sheets_data()
 
