@@ -49,6 +49,7 @@ def sample_health_json(tmp_path):
                     "tdp": "Virtualization",
                     "content_type": "Business Intro",
                     "quarter_created": "CY25Q1",
+                    "gemini_description": "Gemini summary of OpenShift demo",
                     "has_cta": True,
                     "has_deployment_url": True,
                 },
@@ -60,9 +61,16 @@ def sample_health_json(tmp_path):
                 },
                 "sales": {
                     "has_data": True,
-                    "total_opp_value": 500000.0,
-                    "total_won_value": 200000.0,
-                    "opp_value_per_player": 100.0,
+                    "total_sales_uv": 9.0,
+                    "total_sales_mt_uv": 5.0,
+                    "total_inquiries": 3.0,
+                    "total_contacts": 2.0,
+                    "total_opps": 1.5,
+                    "total_wins": 0.7,
+                    "total_opp_value": 80000.0,
+                    "total_won_value": 40000.0,
+                    "total_pages_touched": 2.0,
+                    "opp_value_per_player": 296.3,
                 },
             },
             {
@@ -98,7 +106,7 @@ def sample_health_json(tmp_path):
                     "public_site": "",
                     "cta_link": "",
                 },
-                "sales": {"has_data": False, "total_opp_value": None, "total_won_value": None, "opp_value_per_player": None},
+                "sales": {"has_data": False, "total_sales_uv": None, "total_sales_mt_uv": None, "total_inquiries": None, "total_contacts": None, "total_opps": None, "total_wins": None, "total_opp_value": None, "total_won_value": None, "total_pages_touched": None, "opp_value_per_player": None},
             },
             {
                 "name": "Arcade Gamma",
@@ -128,7 +136,7 @@ def sample_health_json(tmp_path):
                     "has_deployment_url": False,
                 },
                 "deployment": {"drupal_url": "", "rhac_url": "", "public_site": "", "cta_link": ""},
-                "sales": {"has_data": False, "total_opp_value": None, "total_won_value": None, "opp_value_per_player": None},
+                "sales": {"has_data": False, "total_sales_uv": None, "total_sales_mt_uv": None, "total_inquiries": None, "total_contacts": None, "total_opps": None, "total_wins": None, "total_opp_value": None, "total_won_value": None, "total_pages_touched": None, "opp_value_per_player": None},
             },
         ],
     }
@@ -160,6 +168,31 @@ def test_render_html_contains_key_elements(sample_health_json, tmp_path):
     assert ">IE Published</option>" in html
     assert "metadata.rm_status" in html
     assert " — " not in html.split("<select id=\"filter-rm-status\">")[1].split("</select>")[0]
+
+
+def test_render_arcade_links_use_public_site_or_rhac(sample_health_json, tmp_path):
+    output = str(tmp_path / "dashboard.html")
+    render_dashboard(sample_health_json, output)
+    with open(output) as f:
+        html = f.read()
+    assert "arcadeSiteUrl" in html
+    assert "https://public.example.com" in html
+
+
+def test_render_analytics_focus(sample_health_json, tmp_path):
+    output = str(tmp_path / "dashboard.html")
+    render_dashboard(sample_health_json, output)
+    with open(output) as f:
+        html = f.read()
+    assert "Total Players" in html
+    assert "Pipeline" in html
+    assert "Avg Completion Rate" in html
+    assert "Engagement Analytics" in html
+    assert "demo-description" in html
+    assert "Gemini summary of OpenShift demo" in html
+    assert "metadata-dots" not in html
+    assert "metadataDots" not in html
+    assert "Deployment" not in html
 
 
 def test_render_rm_status_is_plain_text(sample_health_json, tmp_path):

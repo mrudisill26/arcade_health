@@ -71,8 +71,7 @@ PYTHONPATH=. pytest tests/ -v
 
 ## Dashboard Features
 
-- Sortable columns (score, status, owner, TDP, players, trend)
-- Filter by lifecycle status, TDP, owner, or free-text search
-- Click any row to expand score breakdown, deployment links, and sales data
-- Metadata completeness indicator dots per arcade
+- Sortable columns (score, lifecycle, RM status, players, completion, trend)
+- Filter by lifecycle status, RM status, TDP, owner, or free-text search
+- Click any row to expand engagement analytics and score breakdown
 - Trend arrows showing engagement direction

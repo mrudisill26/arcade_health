@@ -56,11 +56,11 @@ def sample_rm_csv(tmp_path):
         '"Final Demo Title","Join Key","Creator Name","Creator Team",'
         '"Final Content Type","Quarter","CTALink","Drupal Page URL",'
         '"RHAC page","Public Site Link","Primary Product","TDP",'
-        '"Destination Channels","Demo Description","Request Status"\n'
+        '"Destination Channels","Demo Description","Demo Description (Gemini generated)","Request Status"\n'
         '"Arcade Alpha","Arcade Alpha | Business Intro","Alice Smith","Team A",'
         '"Business Intro","CY26Q1","https://cta.example.com","https://drupal.example.com",'
         '"https://rhac.example.com","https://public.example.com","OpenShift","Virtualization",'
-        '"Web, Social","A demo about OpenShift","IE Published"\n'
+        '"Web, Social","A demo about OpenShift","Gemini summary of OpenShift demo","IE Published"\n'
     )
     return str(csv_path)
 
@@ -87,6 +87,14 @@ def test_merge_datasets_exact_match(sample_engagement_csv, sample_rm_csv):
     alpha = merged[merged["arcade_display_key"] == "Arcade Alpha | Business Intro"].iloc[0]
     assert alpha["owner"] == "Alice Smith"
     assert alpha["team"] == "Team A"
+    assert alpha["gemini_description"] == "Gemini summary of OpenShift demo"
+    assert alpha["has_sales_data"] == True
+    assert alpha["total_opp_value"] == 80000
+    assert alpha["total_won_value"] == 40000
+    assert alpha["total_opps"] == 1.5
+    assert alpha["total_wins"] == 0.7
+    assert alpha["total_sales_uv"] == 9
+    assert alpha["opp_value_per_player"] == pytest.approx(296.3, rel=0.01)
     assert alpha["has_rm_match"] == True
     assert alpha["is_ie_published"] == True
     assert alpha["rm_status"] == "IE Published"
@@ -282,8 +290,12 @@ def test_export_health_json_structure(merged_df, sample_rm_csv, tmp_path):
     }
     assert "engagement" in arcade
     assert "metadata" in arcade
+    assert arcade["metadata"]["gemini_description"] == "Gemini summary of OpenShift demo"
     assert "deployment" in arcade
     assert "sales" in arcade
+    assert arcade["sales"]["total_opp_value"] == 80000
+    assert arcade["sales"]["total_opps"] == 1.5
+    assert arcade["sales"]["opp_value_per_player"] == pytest.approx(296.3, rel=0.01)
 
 
 def test_export_health_json_writes_file(merged_df, tmp_path):

@@ -41,7 +41,21 @@ RM_COLS = [
     "Public Site Link",
     "Destination Channels",
     "Demo Description",
+    "Demo Description (Gemini generated)",
 ]
+
+SALES_AGG = {
+    "total_sales_uv": ("sales_uv_unique", "sum"),
+    "total_sales_mt_uv": ("sales_mt_uv_unique", "sum"),
+    "total_inquiries": ("sales_inquiries_sum", "sum"),
+    "total_contacts": ("sales_contacts_sum", "sum"),
+    "total_opps": ("sales_mt_opps_sum", "sum"),
+    "total_wins": ("sales_mt_wins_sum", "sum"),
+    "total_opp_value": ("sales_mt_opp_value_syb_sum", "sum"),
+    "total_won_value": ("sales_mt_won_value_syb_sum", "sum"),
+    "total_pages_touched": ("sales_distinct_pages_touched", "sum"),
+}
+SALES_METRIC_COLUMNS = list(SALES_AGG.keys()) + ["opp_value_per_player"]
 
 IE_PUBLISHED_STATUS = "IE Published"
 IE_RETIRED_STATUS = "IE Retired"
@@ -258,12 +272,7 @@ def merge_datasets(
     if sales_cols_present:
         sales = engagement[engagement["sales_uv_unique"].notna()]
         if len(sales) > 0:
-            sales_agg = sales.groupby("arcade_display_key").agg(
-                total_opp_value=("sales_mt_opp_value_syb_sum", "sum"),
-                total_won_value=("sales_mt_won_value_syb_sum", "sum"),
-                total_opps=("sales_mt_opps_sum", "sum"),
-                total_wins=("sales_mt_wins_sum", "sum"),
-            ).reset_index()
+            sales_agg = sales.groupby("arcade_display_key").agg(**SALES_AGG).reset_index()
             sales_agg["has_sales_data"] = True
             arcade_agg = arcade_agg.merge(
                 sales_agg, on="arcade_display_key", how="left"
@@ -271,12 +280,16 @@ def merge_datasets(
             arcade_agg["has_sales_data"] = arcade_agg["has_sales_data"].fillna(False)
         else:
             arcade_agg["has_sales_data"] = False
-            for c in ["total_opp_value", "total_won_value", "total_opps", "total_wins"]:
+            for c in SALES_METRIC_COLUMNS:
                 arcade_agg[c] = np.nan
     else:
         arcade_agg["has_sales_data"] = False
-        for c in ["total_opp_value", "total_won_value", "total_opps", "total_wins"]:
+        for c in SALES_METRIC_COLUMNS:
             arcade_agg[c] = np.nan
+
+    arcade_agg["opp_value_per_player"] = (
+        arcade_agg["total_opp_value"] / arcade_agg["total_players"].replace(0, np.nan)
+    ).round(1)
 
     # CTA click rate (pre-March 2026 only)
     pre_mar26 = engagement[engagement["date_ym"] < "2026-03-01"]
@@ -345,6 +358,9 @@ def merge_datasets(
     merged["rhac_url"] = merged.get("RHAC page", pd.Series(dtype=str))
     merged["public_site"] = merged.get("Public Site Link", pd.Series(dtype=str))
     merged["description"] = merged.get("Demo Description", pd.Series(dtype=str))
+    merged["gemini_description"] = merged.get(
+        "Demo Description (Gemini generated)", pd.Series(dtype=str)
+    )
     merged["destination_channels"] = merged.get("Destination Channels", pd.Series(dtype=str))
 
     return merged
@@ -656,6 +672,8 @@ def export_health_json(
                 "tdp": _safe_str(row.get("tdp")),
                 "content_type": _safe_str(row.get("content_type")),
                 "quarter_created": _safe_str(row.get("quarter_created")),
+                "description": _safe_str(row.get("description")),
+                "gemini_description": _safe_str(row.get("gemini_description")),
                 "has_cta": bool(
                     pd.notna(row.get("cta_link")) and row.get("cta_link") != ""
                 ),
@@ -673,13 +691,16 @@ def export_health_json(
             },
             "sales": {
                 "has_data": bool(row.get("has_sales_data", False)),
+                "total_sales_uv": _safe_float(row.get("total_sales_uv")),
+                "total_sales_mt_uv": _safe_float(row.get("total_sales_mt_uv")),
+                "total_inquiries": _safe_float(row.get("total_inquiries")),
+                "total_contacts": _safe_float(row.get("total_contacts")),
+                "total_opps": _safe_float(row.get("total_opps")),
+                "total_wins": _safe_float(row.get("total_wins")),
                 "total_opp_value": _safe_float(row.get("total_opp_value")),
                 "total_won_value": _safe_float(row.get("total_won_value")),
-                "opp_value_per_player": _safe_float(
-                    row.get("total_opp_value", 0) / row.get("total_players", 1)
-                    if row.get("total_players", 0) > 0 and pd.notna(row.get("total_opp_value"))
-                    else None
-                ),
+                "total_pages_touched": _safe_float(row.get("total_pages_touched")),
+                "opp_value_per_player": _safe_float(row.get("opp_value_per_player")),
             },
         }
         result["arcades"].append(arcade)

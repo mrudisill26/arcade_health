@@ -13,13 +13,35 @@ def _ordered_rm_statuses(row_counts: dict, matched_counts: dict) -> list[str]:
     return ordered
 
 
+def _compute_analytics_summary(arcades: list) -> dict:
+    if not arcades:
+        return {"total_players": 0, "avg_3mo_players": 0.0, "avg_completion_rate": 0.0}
+
+    total_players = sum(a.get("engagement", {}).get("total_players") or 0 for a in arcades)
+    avg_3mo = sum(a.get("engagement", {}).get("recent_3mo_avg") or 0 for a in arcades) / len(arcades)
+    completion_rates = [
+        a["engagement"]["completion_rate"]
+        for a in arcades
+        if a.get("engagement", {}).get("completion_rate") is not None
+    ]
+    avg_completion = sum(completion_rates) / len(completion_rates) if completion_rates else 0.0
+
+    return {
+        "total_players": total_players,
+        "avg_3mo_players": round(avg_3mo, 1),
+        "avg_completion_rate": round(avg_completion, 1),
+    }
+
+
 def render_dashboard(json_path: str, output_path: str) -> str:
     with open(json_path) as f:
         data = json.load(f)
 
     generated_date = data["generated_at"][:10]
     summary = data["summary"]
-    arcades_json = json.dumps(data["arcades"])
+    arcades = data["arcades"]
+    analytics = _compute_analytics_summary(arcades)
+    arcades_json = json.dumps(arcades)
 
     status_colors = {
         "Healthy": "var(--status-healthy)",
@@ -231,17 +253,31 @@ def render_dashboard(json_path: str, output_path: str) -> str:
   }}
 
   /* Detail Expansion */
+  .tabulator-detail-row {{
+    width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+  }}
   .detail-row {{
     padding: var(--space-xl);
     background: var(--bg-surface-raised);
     border-top: 1px solid var(--border-default);
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: 1fr 1fr;
     gap: var(--space-xl);
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
   }}
   @media (max-width: 768px) {{
     .stat-cards {{ grid-template-columns: 1fr; }}
     .detail-row {{ grid-template-columns: 1fr; }}
+  }}
+  .detail-section {{
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: break-word;
+    word-break: break-word;
   }}
   .detail-section h4 {{
     font-size: var(--font-size-xs);
@@ -261,6 +297,34 @@ def render_dashboard(json_path: str, output_path: str) -> str:
     text-decoration: none;
   }}
   .detail-section a:hover {{ text-decoration: underline; }}
+  .demo-description {{
+    margin-top: var(--space-sm);
+    margin-bottom: var(--space-md);
+    padding: var(--space-md);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    max-width: 100%;
+    box-sizing: border-box;
+  }}
+  .demo-description-label {{
+    display: block;
+    font-size: var(--font-size-xs);
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: var(--font-weight-semibold);
+    margin-bottom: var(--space-xs);
+  }}
+  .demo-description-text {{
+    margin: 0;
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+    color: var(--text-secondary);
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }}
   .score-bar {{
     display: flex;
     align-items: center;
@@ -290,17 +354,6 @@ def render_dashboard(json_path: str, output_path: str) -> str:
     font-size: var(--font-size-sm);
     font-weight: var(--font-weight-semibold);
   }}
-  .metadata-dots {{
-    display: inline-flex;
-    gap: var(--space-xs);
-  }}
-  .metadata-dots .dot {{
-    width: var(--space-sm);
-    height: var(--space-sm);
-    border-radius: var(--radius-circle);
-  }}
-  .dot-filled {{ background: var(--status-healthy); }}
-  .dot-empty {{ background: var(--border-default); }}
 </style>
 </head>
 <body>
@@ -314,20 +367,20 @@ def render_dashboard(json_path: str, output_path: str) -> str:
     <span class="stat-value">{summary['total_arcades']}</span>
   </div>
   <div class="stat-card">
-    <span class="stat-label">IE Published</span>
-    <span class="stat-value">{summary.get('ie_published_count', 0)}</span>
+    <span class="stat-label">Avg Health Score</span>
+    <span class="stat-value">{summary.get('avg_health_score', '—')}</span>
   </div>
   <div class="stat-card">
-    <span class="stat-label">IE Retired</span>
-    <span class="stat-value">{summary.get('ie_retired_count', 0)}</span>
+    <span class="stat-label">Total Players</span>
+    <span class="stat-value">{analytics['total_players']:,}</span>
   </div>
   <div class="stat-card">
-    <span class="stat-label">Avg Score (IE Published)</span>
-    <span class="stat-value">{summary.get('avg_health_score_ie_published') or '—'}</span>
+    <span class="stat-label">Avg Players (3mo)</span>
+    <span class="stat-value">{analytics['avg_3mo_players']}</span>
   </div>
   <div class="stat-card">
-    <span class="stat-label">Unowned</span>
-    <span class="stat-value">{summary['unowned_count']}</span>
+    <span class="stat-label">Avg Completion Rate</span>
+    <span class="stat-value">{analytics['avg_completion_rate']}%</span>
   </div>
 </div>
 
@@ -409,13 +462,54 @@ function scoreColor(val) {{
   return s.getPropertyValue('--status-retire').trim();
 }}
 
-function metadataDots(meta) {{
-  const checks = [meta.has_rm_match, !!meta.owner, meta.has_cta, !!meta.product || !!meta.tdp, meta.has_deployment_url];
-  return checks.map(c => '<span class="dot ' + (c ? 'dot-filled' : 'dot-empty') + '"></span>').join("");
+function arcadeSiteUrl(dep) {{
+  if (!dep) return "";
+  if (dep.public_site) return dep.public_site;
+  if (dep.rhac_url) return dep.rhac_url;
+  return "";
+}}
+
+function arcadeNameHtml(name, dep) {{
+  const url = arcadeSiteUrl(dep);
+  const safeName = String(name)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/"/g, "&quot;");
+  if (!url) {{
+    return '<span style="font-weight:var(--font-weight-medium)">' + safeName + '</span>';
+  }}
+  const safeUrl = String(url).replace(/"/g, "&quot;");
+  return '<a href="' + safeUrl + '" target="_blank" rel="noopener noreferrer" ' +
+    'style="font-weight:var(--font-weight-medium);color:var(--link-color);text-decoration:none" ' +
+    'onclick="event.stopPropagation()">' + safeName + '</a>';
+}}
+
+function escapeHtml(text) {{
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}}
+
+function formatSalesMoney(value) {{
+  if (value == null || value === "") {{
+    return '<span style="color:var(--text-disabled)">—</span>';
+  }}
+  return "$" + Math.round(value).toLocaleString();
+}}
+
+function formatSalesNumber(value) {{
+  if (value == null || value === "") {{
+    return '<span style="color:var(--text-disabled)">—</span>';
+  }}
+  const rounded = Math.round(value * 10) / 10;
+  return rounded.toLocaleString();
 }}
 
 function makeDetailHtml(arcade) {{
   const s = arcade.scores;
+  const e = arcade.engagement;
   function bar(label, val) {{
     const color = scoreColor(val || 0);
     return '<div class="score-bar">' +
@@ -424,40 +518,40 @@ function makeDetailHtml(arcade) {{
       '<span class="score-bar-value">' + (val||0) + '</span></div>';
   }}
 
-  const dep = arcade.deployment;
-  const links = [
-    dep.drupal_url ? '<p><a href="' + dep.drupal_url + '" target="_blank">Drupal Page</a></p>' : '',
-    dep.rhac_url ? '<p><a href="' + dep.rhac_url + '" target="_blank">RHAC Page</a></p>' : '',
-    dep.public_site ? '<p><a href="' + dep.public_site + '" target="_blank">Public Site</a></p>' : '',
-    dep.cta_link ? '<p><a href="' + dep.cta_link + '" target="_blank">CTA Link</a></p>' : '',
-  ].filter(Boolean).join("") || '<p style="color:var(--text-disabled)">No deployment URLs</p>';
-
-  const sales = arcade.sales;
+  const sales = arcade.sales || {{}};
   const salesHtml = sales.has_data
     ? '<p>Pipeline: $' + (sales.total_opp_value||0).toLocaleString() + '</p>' +
       '<p>Won: $' + (sales.total_won_value||0).toLocaleString() + '</p>' +
-      '<p>$/player: ' + (sales.opp_value_per_player||0).toLocaleString() + '</p>'
+      '<p>Opportunities: ' + formatSalesNumber(sales.total_opps) + '</p>' +
+      '<p>Wins: ' + formatSalesNumber(sales.total_wins) + '</p>' +
+      '<p>$/player: ' + (sales.opp_value_per_player != null ? sales.opp_value_per_player.toLocaleString() : '—') + '</p>'
     : '<p style="color:var(--text-disabled)">No sales data</p>';
 
-  const desc = arcade.metadata.quarter_created
-    ? '<p>Created: ' + arcade.metadata.quarter_created + '</p>'
+  const engagementHtml =
+    '<p>Total players: ' + (e.total_players||0).toLocaleString() + '</p>' +
+    '<p>Recent avg (3mo): ' + Math.round(e.recent_3mo_avg||0).toLocaleString() + ' /mo</p>' +
+    '<p>All-time avg: ' + Math.round(e.alltime_monthly_avg||0).toLocaleString() + ' /mo</p>' +
+    '<p>Completion rate: ' + (e.completion_rate != null ? e.completion_rate + '%' : '—') + '</p>' +
+    '<p>Trend: ' + (TREND_ARROWS[e.trend] || '?') + ' ' + (e.trend || 'unknown') + '</p>' +
+    '<p>Months active: ' + (e.months_active||0) + '</p>';
+  const siteUrl = arcadeSiteUrl(arcade.deployment);
+  const siteLinkHtml = siteUrl
+    ? '<p>Demo link: <a href="' + siteUrl + '" target="_blank" rel="noopener noreferrer">View demo</a></p>'
+    : '<p>Demo link: <span style="color:var(--text-disabled)">No public site or RHAC page</span></p>';
+  const meta = arcade.metadata || {{}};
+  const geminiDesc = meta.gemini_description;
+  const geminiDescHtml = geminiDesc
+    ? '<div class="demo-description">' +
+      '<span class="demo-description-label">Demo description</span>' +
+      '<p class="demo-description-text">' + escapeHtml(geminiDesc) + '</p></div>'
     : '';
-  const statuses = (arcade.metadata.all_rm_statuses && arcade.metadata.all_rm_statuses.length)
-    ? arcade.metadata.all_rm_statuses
-    : (arcade.metadata.rm_status ? [arcade.metadata.rm_status] : []);
-  const rmStatusLine = statuses.length
-    ? '<p>Request Master status: ' + statuses.join(", ") + '</p>'
-    : '<p>Request Master status: <span style="color:var(--text-disabled)">No match</span></p>';
 
   return '<div class="detail-row">' +
-    '<div class="detail-section"><h4>Score Breakdown</h4>' +
+    '<div class="detail-section"><h4>Health Score Breakdown</h4>' +
       bar("Engagement", s.engagement) + bar("Freshness", s.freshness) +
-      bar("Metadata", s.metadata) + bar("Sales", s.sales) + '</div>' +
-    '<div class="detail-section"><h4>Deployment</h4>' + links +
-      '<h4 style="margin-top:var(--space-md)">Sales Attribution</h4>' + salesHtml + '</div>' +
-    '<div class="detail-section"><h4>Details</h4>' + desc + rmStatusLine +
-      '<p>Type: ' + (arcade.metadata.content_type || 'N/A') + '</p>' +
-      '<p>Channels: ' + (arcade.metadata.destination_channels || 'N/A') + '</p>' +
+      bar("Sales", s.sales) + '</div>' +
+    '<div class="detail-section"><h4>Engagement Analytics</h4>' + siteLinkHtml + geminiDescHtml + engagementHtml +
+      '<h4 style="margin-top:var(--space-md)">Sales Attribution</h4>' + salesHtml +
     '</div></div>';
 }}
 
@@ -472,7 +566,9 @@ const table = new Tabulator("#arcade-table", {{
   columns: [
     {{
       title: "Arcade", field: "name", minWidth: 250, widthGrow: 3,
-      formatter: function(cell) {{ return '<span style="font-weight:var(--font-weight-medium)">' + cell.getValue() + '</span>'; }}
+      formatter: function(cell) {{
+        return arcadeNameHtml(cell.getValue(), cell.getRow().getData().deployment);
+      }}
     }},
     {{
       title: "Score", field: "health_score", width: 70, hozAlign: "center",
@@ -503,20 +599,39 @@ const table = new Tabulator("#arcade-table", {{
       formatter: function(cell) {{ const v = cell.getValue(); return v != null ? Math.round(v).toLocaleString() : "-"; }}
     }},
     {{
+      title: "Completion", field: "engagement.completion_rate", width: 90, hozAlign: "right",
+      formatter: function(cell) {{
+        const v = cell.getValue();
+        return v != null ? v.toFixed(1) + '%' : '—';
+      }}
+    }},
+    {{
+      title: "Total Players", field: "engagement.total_players", width: 100, hozAlign: "right",
+      formatter: function(cell) {{ const v = cell.getValue(); return v != null ? v.toLocaleString() : "-"; }}
+    }},
+    {{
+      title: "Pipeline", field: "sales.total_opp_value", width: 100, hozAlign: "right",
+      formatter: function(cell) {{ return formatSalesMoney(cell.getValue()); }}
+    }},
+    {{
+      title: "Won", field: "sales.total_won_value", width: 100, hozAlign: "right",
+      formatter: function(cell) {{ return formatSalesMoney(cell.getValue()); }}
+    }},
+    {{
+      title: "Opps", field: "sales.total_opps", width: 70, hozAlign: "right",
+      formatter: function(cell) {{ return formatSalesNumber(cell.getValue()); }}
+    }},
+    {{
       title: "Trend", field: "engagement.trend", width: 60, hozAlign: "center",
       formatter: function(cell) {{ return TREND_ARROWS[cell.getValue()] || "?"; }}
     }},
     {{ title: "Months", field: "engagement.months_active", width: 70, hozAlign: "center" }},
-    {{
-      title: "Meta", field: "metadata", width: 70, hozAlign: "center",
-      formatter: function(cell) {{ return '<div class="metadata-dots">' + metadataDots(cell.getValue()) + '</div>'; }},
-      headerSort: false,
-    }},
   ],
 }});
 
 // Row click to expand/collapse detail
 table.on("rowClick", function(e, row) {{
+  if (e.target.closest("a")) return;
   const el = row.getElement();
   const existing = el.nextElementSibling;
   if (existing && existing.classList.contains("tabulator-detail-row")) {{
