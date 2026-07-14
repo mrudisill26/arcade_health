@@ -1,5 +1,6 @@
 import json
 import pytest
+from pathlib import Path
 from render import render_dashboard
 
 
@@ -147,3 +148,27 @@ def test_render_html_is_self_contained(sample_health_json, tmp_path):
     assert "<style" in html
     assert "<script" in html
     assert "ARCADE_DATA" in html
+
+
+def test_theme_css_exists_and_contains_tokens():
+    theme_path = Path(__file__).parent.parent / "static" / "theme.css"
+    assert theme_path.exists(), "static/theme.css must exist"
+    content = theme_path.read_text()
+    assert ":root" in content
+    required_tokens = [
+        "--bg-page", "--bg-surface", "--bg-surface-raised", "--bg-input",
+        "--text-primary", "--text-secondary", "--text-muted", "--text-on-color",
+        "--status-healthy", "--status-watch", "--status-refresh",
+        "--status-replace", "--status-retire",
+        "--link-color", "--border-default", "--border-input",
+        "--font-family", "--font-family-heading", "--font-family-mono",
+        "--font-size-xs", "--font-size-sm", "--font-size-md",
+        "--font-size-lg", "--font-size-xl", "--font-size-2xl",
+        "--font-weight-normal", "--font-weight-medium",
+        "--font-weight-semibold", "--font-weight-bold",
+        "--space-xs", "--space-sm", "--space-md",
+        "--space-lg", "--space-xl", "--space-2xl",
+        "--radius-sm", "--radius-md", "--radius-pill", "--radius-circle",
+    ]
+    for token in required_tokens:
+        assert token in content, f"Missing token: {token}"

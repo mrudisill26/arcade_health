@@ -1,0 +1,59 @@
+:root {
+  /* Background Surfaces (Dark Theme) */
+  --bg-page: #1a1a2e;
+  --bg-surface: #16213e;
+  --bg-surface-raised: #1c2a4a;
+  --bg-input: #16213e;
+
+  /* Text */
+  --text-primary: #e0e0e0;
+  --text-secondary: #aaaaaa;
+  --text-muted: #888888;
+  --text-on-color: #ffffff;
+  --text-disabled: #666666;
+
+  /* Lifecycle Status Colors (PatternFly-aligned) */
+  --status-healthy: #3e8635;
+  --status-watch: #f0ab00;
+  --status-refresh: #ef6c00;
+  --status-replace: #c9190b;
+  --status-retire: #6753ac;
+
+  /* Accent / Interactive */
+  --link-color: #2b9af3;
+  --border-default: #333333;
+  --border-input: #4a4a4a;
+
+  /* Typography - Font Families */
+  --font-family: -apple-system, BlinkMacSystemFont, 'Red Hat Text', 'Segoe UI', Roboto, sans-serif;
+  --font-family-heading: 'Red Hat Display', var(--font-family);
+  --font-family-mono: 'Red Hat Mono', 'SF Mono', monospace;
+
+  /* Typography - Font Sizes */
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.8125rem;
+  --font-size-md: 0.875rem;
+  --font-size-lg: 1rem;
+  --font-size-xl: 1.25rem;
+  --font-size-2xl: 1.5rem;
+
+  /* Typography - Font Weights */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* Spacing (8px base grid) */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 24px;
+
+  /* Border Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-pill: 12px;
+  --radius-circle: 50%;
+}
