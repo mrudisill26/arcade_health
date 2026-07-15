@@ -1,0 +1,28 @@
+---
+description: Dataflow project context — catalog pull, merge, and advisor pipeline
+alwaysApply: true
+---
+
+# Dataflow Workflow
+
+This project (`dataflow/`) pulls Red Hat portfolio catalog metadata, merges it, and serves an RCARS-style recommendation API.
+
+## Pipeline steps
+
+1. **Pull Request Master** — `IE_metadata_datapull.py` via GWS CLI → `data/request_master.csv`
+2. **Pull PAList** — `osspa_palist_datapull.py` from GitLab → `data/palist.csv`
+3. **Merge** — `merge_palist_requestmaster.py` → `data/merged_live_and_ie_published.csv`
+4. **Orchestrator** — `live_ie_published_datapull.py` runs steps 1–3
+5. **Index** — `build_index.py` fetches `.adoc`, scans, embeds → `data/advisor_index.sqlite`
+6. **Serve** — `advisor_server.py` (FastAPI + SSE on port 8081)
+
+## POC snapshot
+
+Committed under `poc/` for demo without live pulls. Copy to `data/` before indexing.
+
+## Conventions
+
+- Keep pull scripts stdlib-only; AI/API layer uses `requirements.txt`
+- RM columns in merged CSV use `rm_` prefix with underscores (e.g. `rm_Final_Demo_Title`)
+- Use `catalog_fields.py` helpers for merged CSV field access
+- Generated data under `data/` is gitignored; see `README.md`

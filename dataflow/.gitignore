@@ -1,0 +1,13 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Local IDE / agent settings
+.claude/
+.cursor/settings.local.json
+
+# Generated at runtime (regenerate via pipeline)
+data/*
+!data/.gitkeep
