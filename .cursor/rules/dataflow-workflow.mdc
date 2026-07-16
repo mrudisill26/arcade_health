@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Dataflow Workflow
 
-This project (`dataflow/`) **collects and merges** Red Hat portfolio catalog metadata for other applications to consume. Evaluation / recommendation belongs in the consuming app; the local advisor is optional smoke-test only.
+This repository **collects and merges** Red Hat portfolio catalog metadata for other applications to consume. Evaluation / recommendation belongs in the consuming app; the local advisor is optional smoke-test only.
 
 ## Primary pipeline (handoff)
 
