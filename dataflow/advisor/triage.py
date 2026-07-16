@@ -7,7 +7,7 @@ import os
 import re
 from typing import Any
 
-from catalog_fields import rm_field
+from catalog_fields import demo_description, rm_field
 
 TRIAGE_MODEL = os.environ.get("RCARS_TRIAGE_MODEL", "claude-haiku-4-5")
 TRIAGE_CUTOFF = int(os.environ.get("RCARS_TRIAGE_CUTOFF", "30"))
@@ -21,11 +21,15 @@ def compact_candidate(asset: dict) -> dict[str, Any]:
     return {
         "asset_id": asset.get("asset_id"),
         "heading": asset.get("heading") or metadata.get("Heading") or rm_field(metadata, "Final Demo Title"),
-        "summary": analysis.get("summary") or metadata.get("Summary") or rm_field(metadata, "Demo Description"),
+        "summary": analysis.get("summary") or metadata.get("Summary") or demo_description(metadata),
         "topics": analysis.get("topics") or [],
         "products": analysis.get("products") or [],
-        "category": analysis.get("category") or metadata.get("Vertical") or "",
-        "content_type": analysis.get("content_type") or metadata.get("ProductType") or "",
+        "category": analysis.get("category") or metadata.get("Vertical") or rm_field(metadata, "Verticals") or "",
+        "content_type": analysis.get("content_type")
+        or metadata.get("ProductType")
+        or rm_field(metadata, "Final Content Type")
+        or "",
+        "audience": analysis.get("audience") or rm_field(metadata, "Primary Audience") or "",
         "duration": duration_label,
         "canonical_url": asset.get("canonical_url") or "",
     }
@@ -44,6 +48,7 @@ def build_triage_prompt(query: str, candidates: list[dict]) -> str:
             f"Products: {', '.join(compact['products'])}\n"
             f"Category: {compact['category']}\n"
             f"Content Type: {compact['content_type']}\n"
+            f"Audience: {compact['audience']}\n"
             f"Duration: {compact['duration']}\n"
         )
     return f"""You are evaluating RHDP portfolio catalog items for relevance to a user's request.

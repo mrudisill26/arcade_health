@@ -7,7 +7,7 @@ import os
 import re
 from typing import Any
 
-from catalog_fields import rm_field
+from catalog_fields import demo_description, rm_field
 
 RATIONALE_MODEL = os.environ.get("RCARS_RATIONALE_MODEL", "claude-sonnet-4-6")
 RATIONALE_TOP_N = int(os.environ.get("RCARS_RATIONALE_TOP_N", "5"))
@@ -31,7 +31,10 @@ def build_rationale_prompt(query: str, candidates: list[dict]) -> str:
             f"Format Notes: {analysis.get('format_notes')}\n"
             f"Duration: {analysis.get('estimated_duration_minutes')}\n"
             f"URL: {candidate.get('canonical_url')}\n"
-            f"RM Description: {rm_field(metadata, 'Demo Description')[:800]}\n"
+            f"RM Description: {demo_description(metadata)[:800]}\n"
+            f"Audience: {analysis.get('audience') or rm_field(metadata, 'Primary Audience')}\n"
+            f"Personas: {rm_field(metadata, 'Personas')}\n"
+            f"Pain Points: {rm_field(metadata, 'Pain Points')}\n"
         )
     return f"""Generate recommendation rationales for the user's request.
 

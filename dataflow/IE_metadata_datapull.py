@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from merge_palist_requestmaster import RM_COLUMNS
+
 DEFAULT_SPREADSHEET_ID = "1t7TJtTL-jbUaCVKVLMMOahbKcL5b1IyCf3uUSCmQo4A"
 DEFAULT_RANGE = "Request_Master"
 DEFAULT_OUTPUT = Path("data/request_master.csv")
@@ -48,16 +50,41 @@ def fetch_sheet_json(spreadsheet_id: str, range_name: str) -> list[list[str]]:
     return values
 
 
+def project_columns(rows: list[list[str]], columns: list[str]) -> tuple[list[list[str]], list[str]]:
+    """Keep only the requested header columns; warn on missing names."""
+    if not rows:
+        return [], []
+    header = [flatten_cell(cell) for cell in rows[0]]
+    index_by_name = {name: idx for idx, name in enumerate(header)}
+    missing = [col for col in columns if col not in index_by_name]
+    projected: list[list[str]] = [list(columns)]
+    for raw in rows[1:]:
+        projected.append(
+            [
+                flatten_cell(raw[index_by_name[col]]) if col in index_by_name and index_by_name[col] < len(raw) else ""
+                for col in columns
+            ]
+        )
+    return projected, missing
+
+
 def sheet_to_csv(spreadsheet_id: str, range_name: str, output_path: Path) -> Path:
     rows = fetch_sheet_json(spreadsheet_id, range_name)
     if not rows:
         raise RuntimeError(f"No rows returned for range {range_name!r}")
 
+    projected, missing = project_columns(rows, RM_COLUMNS)
+    if missing:
+        print(
+            "Warning: Request_Master missing columns: " + ", ".join(missing),
+            file=sys.stderr,
+        )
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle, quoting=csv.QUOTE_ALL)
-        for row in rows:
-            writer.writerow([flatten_cell(cell) for cell in row])
+        for row in projected:
+            writer.writerow(row)
     return output_path
 
 

@@ -8,7 +8,7 @@ import os
 import re
 from typing import Any
 
-from catalog_fields import display_heading, rm_field
+from catalog_fields import demo_description, display_heading, rm_field
 
 SCAN_MODEL = os.environ.get("RCARS_SCAN_MODEL", "claude-sonnet-4-6")
 
@@ -41,8 +41,12 @@ def build_scan_prompt(row: dict[str, str], parsed_text: str) -> str:
         f"ProductType: {row.get('ProductType') or ''}",
         f"Products: {row.get('Product') or rm_field(row, 'Primary Product') or rm_field(row, 'Product') or ''}",
         f"Vertical: {row.get('Vertical') or rm_field(row, 'Verticals') or ''}",
-        f"RM Content Type: {rm_field(row, 'Content Type') or rm_field(row, 'Final Content Type') or ''}",
+        f"RM Content Type: {rm_field(row, 'Final Content Type') or ''}",
         f"RM Duration: {rm_field(row, 'Duration') or ''}",
+        f"Audience: {rm_field(row, 'Primary Audience') or ''}",
+        f"Personas: {rm_field(row, 'Personas') or ''}",
+        f"Pain Points: {rm_field(row, 'Pain Points') or ''}",
+        f"Demo Description: {demo_description(row)[:1200]}",
         f"Source: {row.get('source') or ''}",
     ]
     return f"""Analyze this Red Hat portfolio catalog asset and return ONLY valid JSON matching this schema:
@@ -82,12 +86,21 @@ def normalize_analysis(raw: dict[str, Any], row: dict[str, str]) -> dict[str, An
         return []
 
     return {
-        "summary": str(raw.get("summary") or row.get("Summary") or rm_field(row, "Demo Description") or "").strip(),
+        "summary": str(
+            raw.get("summary") or row.get("Summary") or demo_description(row) or ""
+        ).strip(),
         "topics": as_list(raw.get("topics")),
         "products": as_list(raw.get("products")),
-        "content_type": str(raw.get("content_type") or row.get("ProductType") or "other").strip(),
+        "content_type": str(
+            raw.get("content_type")
+            or row.get("ProductType")
+            or rm_field(row, "Final Content Type")
+            or "other"
+        ).strip(),
         "category": str(raw.get("category") or "").strip(),
-        "audience": str(raw.get("audience") or "").strip(),
+        "audience": str(
+            raw.get("audience") or rm_field(row, "Primary Audience") or ""
+        ).strip(),
         "estimated_duration_minutes": duration,
         "duration_source": duration_source,
         "format_notes": str(raw.get("format_notes") or "").strip(),
@@ -129,12 +142,12 @@ def fallback_analysis(row: dict[str, str], parsed_text: str) -> dict[str, Any]:
     ]
     return normalize_analysis(
         {
-            "summary": row.get("Summary") or rm_field(row, "Demo Description") or parsed_text[:400],
+            "summary": row.get("Summary") or demo_description(row) or parsed_text[:400],
             "topics": [],
             "products": products,
-            "content_type": row.get("ProductType") or rm_field(row, "Content Type") or "other",
-            "category": row.get("Vertical") or "",
-            "audience": "",
+            "content_type": row.get("ProductType") or rm_field(row, "Final Content Type") or "other",
+            "category": row.get("Vertical") or rm_field(row, "Verticals") or "",
+            "audience": rm_field(row, "Primary Audience"),
             "estimated_duration_minutes": parse_duration_minutes(rm_field(row, "Duration")),
             "duration_source": "curated" if rm_field(row, "Duration") else "estimated",
             "format_notes": rm_field(row, "Final Content Type") or "",
