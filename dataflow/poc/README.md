@@ -1,19 +1,19 @@
-# POC data snapshot
+# POC catalog snapshot
 
-This folder contains a **frozen catalog export** for demonstrating the advisor without running live pulls.
+Frozen **merged catalog CSV** for offline use / handoff without live Google Sheet or GitLab pulls.
 
 | File | Description |
 |---|---|
-| `merged_live_and_ie_published.csv` | Merged catalog (live PAList + IE Published Request Master) |
+| `merged_live_and_ie_published.csv` | Handoff-schema catalog (live PAList + IE Published RM) |
 | `stats.json` | Row counts and source breakdown |
 
-For what columns are collected, how joins work, and how to refresh from Google Sheets / GitLab, see **[Data collection](../README.md#data-collection)** in the main README.
+Consuming apps should treat this file the same as `data/merged_live_and_ie_published.csv`.
 
-> After changing `RM_COLUMNS` or join logic, refresh this snapshot from a fresh `data/merged_live_and_ie_published.csv` so the POC matches the live schema.
+Full column list, join rules, and pull instructions: **[Handoff contract](../README.md#handoff-contract)** in the main README.
 
-## Refresh the snapshot
+> After changing `RM_COLUMNS` or join logic, refresh from a fresh live merge so the snapshot matches production schema.
 
-After updating live data:
+## Refresh
 
 ```bash
 cp data/merged_live_and_ie_published.csv poc/
@@ -27,8 +27,12 @@ stats = {
     'row_count': len(rows),
     'sources': dict(Counter(r['source'] for r in rows)),
     'with_detail_page': sum(1 for r in rows if (r.get('DetailPage') or '').strip()),
+    'rm_column_count': sum(1 for c in rows[0] if c.startswith('rm_')),
+    'has_gemini_description': sum(
+        1 for r in rows if (r.get('rm_Demo_Description_(Gemini_generated)') or '').strip()
+    ),
 }
-Path('poc/stats.json').write_text(json.dumps(stats, indent=2))
+Path('poc/stats.json').write_text(json.dumps(stats, indent=2) + '\n')
 print(json.dumps(stats, indent=2))
 "
 ```

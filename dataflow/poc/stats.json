@@ -1,17 +1,11 @@
 {
-  "row_count": 301,
+  "row_count": 300,
   "sources": {
-    "PAList only": 62,
-    "PAList+RM": 190,
-    "RM only": 49
+    "PAList only": 61,
+    "PAList+RM": 191,
+    "RM only": 48
   },
   "with_detail_page": 251,
-  "product_types": {
-    "IE": 177,
-    "(empty)": 49,
-    "PA": 39,
-    "Demo": 31,
-    "PA,VP": 3,
-    "SP": 2
-  }
+  "rm_column_count": 33,
+  "has_gemini_description": 234
 }

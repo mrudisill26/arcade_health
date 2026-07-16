@@ -1,326 +1,253 @@
-# Dataflow — Portfolio Catalog Advisor (POC)
+# Dataflow — Portfolio catalog data collection
 
-A data pipeline and RCARS-style recommendation API for Red Hat Architecture Center / Interactive Experience assets. Pulls catalog metadata from Google Sheets and GitLab, merges it, indexes content with vector embeddings, and serves semantic search with progressive SSE results.
+**Purpose:** Pull and merge Red Hat portfolio catalog metadata into a stable CSV that other applications can consume for search, recommendation, or evaluation.
 
-## What it does
+This package is a **data collection workflow**. Evaluation / ranking / LLM recommendation logic belongs in the consuming application. A local advisor POC remains in-repo for smoke-testing the catalog, but it is **not** the handoff deliverable.
 
 ```
 Request_Master (Google Sheet)  ──┐
-                                 ├── merge ──► merged CSV ──► fetch .adoc ──► scan ──► embed ──► SQLite index
-PAList (GitLab osspa-site)     ──┘                                                              │
-                                                                                                ▼
-                                                                                    FastAPI advisor (vector → triage → rationale)
+                                 ├── merge ──► merged_live_and_ie_published.csv  ──► your app
+PAList (GitLab osspa-site)     ──┘
+                                      │
+                                      └── (optional) .adoc fetch / scan / embed / local advisor
 ```
-
-| Stage | Script | Output |
-|---|---|---|
-| Pull Request Master | `IE_metadata_datapull.py` | `data/request_master.csv` |
-| Pull PAList | `osspa_palist_datapull.py` | `data/palist.csv` |
-| Merge | `merge_palist_requestmaster.py` | `data/merged_live_and_ie_published.csv` |
-| Orchestrator | `live_ie_published_datapull.py` | Runs pull + merge |
-| Index | `build_index.py` | `data/advisor_index.sqlite` |
-| Serve | `advisor_server.py` | HTTP API on port 8081 |
 
 ---
 
-## Data collection
+## Handoff contract
 
-This section is the source of truth for **what we pull, how we join it, and what lands in the catalog**.
+### Primary deliverable
 
-### Overview
+| Artifact | Path | Description |
+|---|---|---|
+| **Merged catalog CSV** | `data/merged_live_and_ie_published.csv` | One row per asset. This is what you plug into another application. |
+| POC snapshot (same schema) | `poc/merged_live_and_ie_published.csv` | Committed sample for offline use / CI without live pulls |
 
-| Step | When | Source | Local artifact |
-|---|---|---|---|
-| 1. Pull RM | On demand / orchestrator | Google Sheet `Request_Master` via `gws` | `data/request_master.csv` |
-| 2. Pull PAList | On demand / orchestrator | GitLab `osspa-site` raw CSV | `data/palist.csv` |
-| 3. Merge | After pulls (or `--skip-pull`) | Join RM ↔ PAList | `data/merged_live_and_ie_published.csv` |
-| 4. Fetch content | During `build_index.py` | GitLab `.adoc` (or metadata fallback) | `data/content_cache/` + index |
-| 5. Scan + embed | During `build_index.py` | Merged row + parsed text | `data/advisor_index.sqlite` |
-
-Orchestrator (pull both sources, then merge):
+### How to produce it
 
 ```bash
+cd dataflow
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt   # stdlib-only for pull/merge; requirements needed if you also index
+
+# Requires: gws authenticated + GitLab network access
 .venv/bin/python live_ie_published_datapull.py
-# or merge only, using existing CSVs:
+```
+
+Output: `data/merged_live_and_ie_published.csv` (~300 rows).
+
+Merge-only (reuse existing pulls):
+
+```bash
 .venv/bin/python live_ie_published_datapull.py --skip-pull
 ```
 
-Generated files under `data/` are gitignored. For demos without live pulls, copy `poc/merged_live_and_ie_published.csv` → `data/`.
+### What the consuming app should read
+
+Each row includes:
+
+| Field group | Examples | Notes |
+|---|---|---|
+| Join / identity | `source`, `canonical_url`, `ppid`, `PAName`, `rm_Number`, `rm_Join_Key` | `source` ∈ `PAList+RM` \| `PAList only` \| `RM only` |
+| PAList catalog | `Heading`, `Summary`, `Vertical`, `Product`, `ProductType`, `DetailPage`, `islive`, … | Blank on RM-only rows |
+| Request Master (`rm_*`) | `rm_Final_Demo_Title`, `rm_Demo_Description`, `rm_Demo_Description_(Gemini_generated)`, `rm_Duration`, `rm_Primary_Product`, `rm_SEOWords`, `rm_Primary_Audience`, … | Blank on PAList-only rows |
+
+**Preferred description for display / retrieval text:**  
+`rm_Demo_Description_(Gemini_generated)` falling back to `rm_Demo_Description` or PAList `Summary`  
+(helper: `catalog_fields.demo_description(row)`).
+
+**Do not treat as portfolio ppid:** `rm_Number` (RM-internal id), title-like `rm_Join_Key`.
+
+Helpers for field access live in `catalog_fields.py` (`rm_field`, `display_heading`, `demo_description`).
+
+### Out of scope for handoff
+
+These are optional local tools, not required by the consuming app:
+
+- `build_index.py` / `advisor_index.sqlite` — embeddings index
+- `advisor_server.py` / `advisor/` — RCARS-style evaluation POC
+- `ANTHROPIC_API_KEY` — only for optional scan / local advisor
+
+Pull + merge scripts are intended to stay **stdlib-only** (`IE_metadata_datapull.py`, `osspa_palist_datapull.py`, `merge_palist_requestmaster.py`, `live_ie_published_datapull.py`).
+
+---
+
+## Pipeline stages
+
+| Stage | Script | Output | Required for handoff? |
+|---|---|---|---|
+| Pull Request Master | `IE_metadata_datapull.py` | `data/request_master.csv` | Yes |
+| Pull PAList | `osspa_palist_datapull.py` | `data/palist.csv` | Yes |
+| Merge | `merge_palist_requestmaster.py` | `data/merged_live_and_ie_published.csv` | Yes |
+| Orchestrator | `live_ie_published_datapull.py` | Runs pull + merge | Yes (entry point) |
+| Fetch `.adoc` / scan / embed | `build_index.py` | `data/advisor_index.sqlite` | No |
+| Local advisor API | `advisor_server.py` | `:8081` | No |
+
+---
+
+## Data collection details
 
 ### Source 1 — Request Master (Google Sheet)
 
 | | |
 |---|---|
 | Script | `IE_metadata_datapull.py` |
-| Auth | [Google Workspace CLI (`gws`)](https://github.com/googleworkspace/cli) must be authenticated |
-| Spreadsheet | Default ID in script (`DEFAULT_SPREADSHEET_ID`) |
+| Auth | [Google Workspace CLI (`gws`)](https://github.com/googleworkspace/cli) |
 | Tab | `Request_Master` |
 | Output | `data/request_master.csv` |
 
-The sheet is fetched in full, then **projected to a fixed column whitelist** (`RM_COLUMNS` in `merge_palist_requestmaster.py`). Missing headers are filled empty and warned on stderr.
+The sheet is fetched in full, then **projected to a fixed whitelist** (`RM_COLUMNS` in `merge_palist_requestmaster.py`). Missing headers become empty cells; warnings go to stderr.
 
-#### Columns collected (with sheet letters)
+#### Columns collected (sheet letters)
 
-| Column | Letter | Role in pipeline |
+| Column | Letter | Why we keep it |
 |---|---|---|
-| Status | A | Filter IE Published RM-only rows; prefer published when colliding |
+| Status | A | IE Published filter; collision preference |
 | Public Site Link | B | Canonical URL + **ppid extraction** |
 | Production Link | C | Canonical URL + ppid extraction |
-| Final Content Type | D | Format / content type for scan & triage |
+| Final Content Type | D | Content / format type |
 | Drupal Page URL | F | Canonical URL + ppid extraction |
 | RHAC page | G | Canonical URL + ppid extraction |
-| Final Demo Title | H | Heading fallback; **secondary title join** |
-| Publish states | S | Publish metadata (kept for future filters) |
+| Final Demo Title | H | Title; secondary join |
+| Publish states | S | Publish metadata |
 | Featured Start Date | U | Featured window |
 | Featured End Date | V | Featured window |
 | Origin Type | AF | Provenance |
-| Primary Product | AO | Product signal for scan / embed |
-| Product | AP | Product signal |
-| Marketing Program | AV | Catalog metadata |
-| TDP | AW | Catalog metadata |
-| Sales Tactic | AX | Catalog metadata |
-| Verticals | AY | Vertical for embed / triage |
-| Event | AZ | Event fit context |
-| Primary Audience | BA | Audience for embed / triage / rationale |
-| Personas | BB | Audience detail |
-| Pain Points | BC | Intent matching signal |
+| Primary Product | AO | Product |
+| Product | AP | Product |
+| Marketing Program | AV | Program |
+| TDP | AW | TDP |
+| Sales Tactic | AX | Tactic |
+| Verticals | AY | Vertical |
+| Event | AZ | Event |
+| Primary Audience | BA | Audience |
+| Personas | BB | Personas |
+| Pain Points | BC | Pain points |
 | Creator Name | BH | Attribution |
 | Creator Team | BJ | Attribution |
-| Quarter | BL | Planning metadata |
-| Demo Description | BM | Manual description (fallback) |
-| Demo Description (Gemini generated) | BN | **Preferred description** for embed / scan / triage |
+| Quarter | BL | Quarter |
+| Demo Description | BM | Manual description |
+| Demo Description (Gemini generated) | BN | Preferred generated description |
 | Language | BO | Locale |
-| Duration | BP | Curated duration for rerank |
-| SEOWords | BQ | Keyword signal in embeddings |
-| CTALink | BV | CTA URL |
-| Join Key | CA | Usually a **title**, not a ppid (see join rules) |
-| Number | CB | RM-internal row id (not portfolio ppid) |
-| Metadata | CC | Freeform sheet metadata |
+| Duration | BP | Duration |
+| SEOWords | BQ | SEO / keywords |
+| CTALink | BV | CTA |
+| Join Key | CA | Usually a **title**, not a ppid |
+| Number | CB | RM-internal id (not portfolio ppid) |
+| Metadata | CC | Freeform |
 
-After merge, these appear on catalog rows with an `rm_` prefix and spaces turned into underscores, e.g.:
+Merged names use `rm_` + spaces → underscores, e.g. `rm_Demo_Description_(Gemini_generated)`.
 
-- `Demo Description` → `rm_Demo_Description`
-- `Demo Description (Gemini generated)` → `rm_Demo_Description_(Gemini_generated)`
-
-Helpers: `catalog_fields.rm_field()`, `demo_description()` (Gemini first, then manual).
-
-#### Fields intentionally not pulled
-
-Older columns such as `Content Type`, `Creation Link`, `Creator Employee Advocacy Link`, and `Latest Prod Link` are no longer in the whitelist. Prefer `Final Content Type` for type.
+**Not pulled:** `Content Type`, `Creation Link`, `Creator Employee Advocacy Link`, `Latest Prod Link` (use `Final Content Type` instead).
 
 ### Source 2 — PAList (GitLab)
 
 | | |
 |---|---|
-| Script | `osspa_palist_datapull.py` (PAList only in the live/IE orchestrator) |
-| Auth | None (public raw URLs) |
-| Repo path | `osspa-site` → `src/app/ArchitectureList/PAList.csv` |
+| Script | `osspa_palist_datapull.py` |
+| Auth | None (public raw URL) |
+| Path | `osspa-site` → `ArchitectureList/PAList.csv` |
 | Output | `data/palist.csv` |
 
-#### PAList columns kept in the merge
+Columns kept: `ppid`, `PAName`, `Heading`, `islive`, `isnew`, `showInCatalog`, `Summary`, `Vertical`, `Solutions`, `Platform`, `Product`, `ProductType`, `Image1Url`, `DetailPage`, `Status`, `externalUrl`, `isRedirected`.
 
-`ppid`, `PAName`, `Heading`, `islive`, `isnew`, `showInCatalog`, `Summary`, `Vertical`, `Solutions`, `Platform`, `Product`, `ProductType`, `Image1Url`, `DetailPage`, `Status`, `externalUrl`, `isRedirected`
+`DetailPage` points at AsciiDoc in [portfolio-architecture-examples](https://gitlab.com/osspa/portfolio-architecture-examples) (used only if you run optional indexing).
 
-`DetailPage` drives `.adoc` fetch from [portfolio-architecture-examples](https://gitlab.com/osspa/portfolio-architecture-examples).
+### Merge — join rules
 
-The same script can also pull Platform/Type/Solution/Product/DetailLink CSVs for other uses; the advisor merge path uses **PAList** only.
+Script: `merge_palist_requestmaster.py`
 
-### Source 3 — AsciiDoc body (at index time)
+1. **Primary — portfolio ppid** from RM URLs (`RHAC page`, `Public Site Link`, `Drupal Page URL`, `Production Link`), or from `Join Key` only when it is bare digits or `123-slug` paname form. Never treat title-like Join Keys (e.g. `5. Kaoto - …`) as ppids. Never use `Number` as portfolio ppid.
+2. **Secondary — unique title match** between PAList `Heading` and RM `Join Key` / `Final Demo Title` (light normalization; parentheticals like `(Autoplay)` kept so variants do not cross-link). Skipped on ppid conflict or if the RM row is already claimed.
+3. **Collisions:** prefer RM `Status == "IE Published"`.
 
-| | |
-|---|---|
-| Script | `adoc_fetch.py` (called from `build_index.py`) |
-| Repo | `portfolio-architecture-examples` raw `main` |
-| Cache | `data/content_cache/` |
+#### Catalog filter (`merge_live_and_ie_published`)
 
-If `DetailPage` is set, the `.adoc` is fetched and parsed to plain text. If missing or fetch fails, a **metadata-only** blob is used (heading, summaries, Gemini/manual description, products, verticals, audience, SEO words, etc.).
+Keeps:
 
-### Merge — how rows are joined
+1. PAList rows with `islive == TRUE` (RM attached when joined)
+2. RM-only rows with `rm_Status == "IE Published"`
 
-Script: `merge_palist_requestmaster.py`  
-Primary output for the advisor: `data/merged_live_and_ie_published.csv`
+Typical mix: mostly `PAList+RM`, plus some `PAList only` / `RM only` orphans or variants.
 
-Each merged row has:
+### Optional: content enrichment (not required for handoff)
 
-- `source`: `PAList+RM` | `PAList only` | `RM only`
-- `canonical_url`: best public URL
-- All PAList columns (blank for RM-only)
-- All `rm_*` columns (blank for PAList-only)
-
-#### Join strategy (order matters)
-
-1. **Primary — portfolio ppid**
-   - From RM URLs: `RHAC page`, `Public Site Link`, `Drupal Page URL`, `Production Link` (slug leading digits, e.g. `108-…` → `108`)
-   - From `Join Key` **only** when it is clearly an id:
-     - bare digits, or
-     - paname form `123-slug`
-   - **Do not** treat title-like Join Keys (e.g. `5. Kaoto - …`) as ppids
-   - **`Number` is not a portfolio ppid** (RM-internal counter)
-
-2. **Secondary — unique title match**
-   - Normalize lightly (case, punctuation); **keep** parentheticals like `(Autoplay)` so variants do not cross-link
-   - Match PAList `Heading` ↔ RM `Join Key` / `Final Demo Title` when the normalized title is unique on both sides
-   - Skip if URL-derived ppids would conflict or the RM row is already claimed
-
-3. **Collision preference**
-   - When two RM rows map to the same ppid, prefer `Status == "IE Published"`
-
-#### Live / IE Published catalog filter
-
-`merge_live_and_ie_published()` keeps:
-
-1. All PAList rows with `islive == TRUE` (with RM attached when joined)
-2. Plus RM-only rows where `rm_Status == "IE Published"`
-
-Typical size: ~300 rows (mostly `PAList+RM`, plus some `PAList only` / `RM only`).
-
-Remaining `PAList only` rows are usually true orphans or intentional variants (autoplay / deep-dive) without a safe RM match.
-
-### What collected data is used for downstream
-
-| Stage | Uses |
-|---|---|
-| **Embeddings** (`embed_index.build_embed_text`) | Heading, analysis summary, Gemini/manual description, topics, products, type, vertical, solutions, audience, personas, pain points, SEO words, parsed body excerpt |
-| **Scan** (`scan_analyze.py`) | Heading, PAList summary, products, vertical, Final Content Type, duration, audience/personas/pain points, Gemini description, body text |
-| **Triage / rationale** | Compact catalog + analysis fields; description via `demo_description()` |
-| **Duration rerank** | Curated `rm_Duration` when the user query mentions a time limit |
-
-Without `ANTHROPIC_API_KEY`, scan/triage/rationale fall back to metadata (still using collected RM/PAList fields).
-
-### Refresh checklist
+If the consuming app wants body text or vectors from this repo:
 
 ```bash
-# 1) Pull + merge
-.venv/bin/python live_ie_published_datapull.py
-
-# 2) Rebuild index (required after column or join changes)
-export ANTHROPIC_API_KEY="..."   # optional but recommended
-.venv/bin/python build_index.py
-
-# 3) Serve
-.venv/bin/uvicorn advisor_server:app --port 8081
+.venv/bin/python build_index.py --fallback-scan
+# or with ANTHROPIC_API_KEY for LLM scan analysis
 ```
 
-To update the committed demo snapshot after a good pull:
-
-```bash
-cp data/merged_live_and_ie_published.csv poc/merged_live_and_ie_published.csv
-```
+That writes `data/advisor_index.sqlite` (metadata JSON per asset, parsed text, optional embeddings). Your application may instead ingest the merged CSV directly and build its own index.
 
 ---
 
-## Quick start
-
-### Prerequisites
+## Prerequisites
 
 - Python 3.11+
-- [Google Workspace CLI (`gws`)](https://github.com/googleworkspace/cli) authenticated (for live Request Master pulls)
-- Network access to GitLab (public raw URLs — no token needed)
+- [`gws`](https://github.com/googleworkspace/cli) authenticated (Request Master pulls)
+- Network access to GitLab public raw URLs
 
-Optional: `ANTHROPIC_API_KEY` for Sonnet/Haiku scan, triage, and rationale. Works without it using metadata fallbacks.
+---
 
-### Setup
+## Quick start (data only)
 
 ```bash
 cd dataflow
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python live_ie_published_datapull.py
+ls -la data/merged_live_and_ie_published.csv
 ```
 
-### Option A — Use committed POC snapshot (no pulls required)
+Offline sample (no pulls):
 
 ```bash
 mkdir -p data
 cp poc/merged_live_and_ie_published.csv data/
+```
+
+### Optional local advisor smoke test
+
+```bash
 .venv/bin/python build_index.py --fallback-scan
 .venv/bin/uvicorn advisor_server:app --port 8081
-```
-
-### Option B — Refresh from live sources
-
-```bash
-.venv/bin/python live_ie_published_datapull.py          # full pull
-# or
-.venv/bin/python live_ie_published_datapull.py --skip-pull  # merge existing CSVs only
-
-export ANTHROPIC_API_KEY="..."   # optional
-.venv/bin/python build_index.py
-.venv/bin/uvicorn advisor_server:app --port 8081
-```
-
-### Test the API
-
-In a **second terminal**:
-
-```bash
-# Health check
 curl http://localhost:8081/advisor/health
-
-# Submit a query
-curl -X POST http://localhost:8081/advisor/query \
-  -H 'Content-Type: application/json' \
-  -d '{"query":"Ansible automation orchestrator workshop"}'
-
-# Stream results (replace JOB_ID)
-curl -N http://localhost:8081/advisor/query/JOB_ID/stream
 ```
 
-Expected SSE phases: `VECTOR_SEARCH` → `TRIAGE` → `RATIONALE` → `COMPLETE`.
+Env knobs for that POC only: `ANTHROPIC_API_KEY`, `RCARS_VECTOR_CUTOFF`, `RCARS_TRIAGE_CUTOFF`, `RCARS_RATIONALE_TOP_N`.
 
-## API endpoints
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/advisor/health` | Index stats |
-| `POST` | `/advisor/query` | Submit query → `{job_id}` |
-| `GET` | `/advisor/query/{job_id}/stream` | SSE progressive results |
-| `POST` | `/advisor/reindex` | Background index rebuild |
-
-There is no web UI — use `curl`, Postman, or any HTTP client.
-
-## Configuration
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | — | Enables Sonnet scan + Haiku triage + Sonnet rationale |
-| `RCARS_VECTOR_CUTOFF` | `0.55` | Max cosine distance for vector search |
-| `RCARS_TRIAGE_CUTOFF` | `30` | Min relevance score |
-| `RCARS_RATIONALE_TOP_N` | `5` | Candidates sent to rationale phase |
+---
 
 ## Project layout
 
 ```
 dataflow/
-├── README.md
-├── requirements.txt
-├── live_ie_published_datapull.py   # pull + merge orchestrator
-├── IE_metadata_datapull.py          # GWS → Request_Master CSV (column projection)
-├── osspa_palist_datapull.py         # GitLab → PAList CSV
-├── merge_palist_requestmaster.py    # join + live/IE filter (RM_COLUMNS live here)
-├── adoc_fetch.py                    # fetch .adoc from portfolio-architecture-examples
-├── adoc_parse.py                    # strip AsciiDoc to plain text
-├── scan_analyze.py                  # LLM structured analysis
-├── embed_index.py                   # sentence-transformers embeddings
-├── build_index.py                   # ingest entry point
-├── advisor_server.py                # FastAPI + SSE
-├── catalog_fields.py                # shared CSV field helpers
-├── advisor/                         # recommendation pipeline
-│   ├── pipeline.py                  # vector → triage → rationale
-│   ├── vector_search.py
-│   ├── triage.py
-│   └── ...
-├── poc/                             # committed snapshot for demo (see poc/README.md)
-└── data/                            # local generated data (gitignored)
+├── README.md                        # this handoff doc
+├── live_ie_published_datapull.py    # entry point: pull + merge
+├── IE_metadata_datapull.py          # Request Master → CSV
+├── osspa_palist_datapull.py         # PAList → CSV
+├── merge_palist_requestmaster.py    # join + filter (RM_COLUMNS)
+├── catalog_fields.py                # merged-row field helpers
+├── build_index.py                   # optional enrichment
+├── advisor_server.py / advisor/     # optional local evaluation POC
+├── poc/                             # committed catalog snapshot
+└── data/                            # generated (gitignored)
 ```
 
-## What gets gitignored
+## Gitignore
 
-- `data/` — regenerated locally (CSVs, index, content cache)
-- `.venv/` — Python virtual environment
-- `.claude/` — local IDE settings
+- `data/` — regenerated locally
+- `.venv/`
+- `.claude/`
 
-The `poc/` folder contains a committed CSV snapshot so clones can run the advisor without live pulls.
+Refresh the committed snapshot after a good pull:
+
+```bash
+cp data/merged_live_and_ie_published.csv poc/
+# update poc/stats.json (see poc/README.md)
+```
 
 ## Related
 
-Part of the [retirement](../) repo. See also the parent project's arcade health dashboard (`build_dashboard.py`).
+Part of the [retirement](../) repo.
